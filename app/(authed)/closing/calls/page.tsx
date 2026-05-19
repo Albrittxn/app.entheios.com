@@ -5,7 +5,7 @@ import { splitUpcomingPast } from "@/lib/closing-leads";
 import { readStoredLeads } from "@/lib/closing-leads-store";
 import { getEffectiveUser } from "@/lib/effective-user";
 import { listUsersForHub, type RawUser } from "@/lib/hub-users";
-import { ADMIN_EMAIL } from "@/lib/permissions";
+import { ADMIN_EMAIL, getUserRecord } from "@/lib/permissions";
 import { CallsList, type CloserOption } from "@/components/closing/calls-list";
 
 export const dynamic = "force-dynamic";
@@ -21,10 +21,13 @@ export default async function ClosingCalls({
   // impersonated closer exactly — their calls only, no filter chips.
   const isAdmin = !ctx?.impersonating && !!ctx?.actorIsAdmin;
 
-  const [stored, hubUsers] = await Promise.all([
+  const [stored, hubUsers, record] = await Promise.all([
     readStoredLeads(),
     isAdmin ? listUsersForHub("closing").catch(() => [] as RawUser[]) : Promise.resolve([] as RawUser[]),
+    ctx?.effectiveEmail ? getUserRecord(ctx.effectiveEmail) : Promise.resolve(null),
   ]);
+
+  const timezone = record?.timezone ?? "";
 
   // Closer filter: admins can filter by any closer email; non-admins always
   // see only their own assigned bookings.
@@ -40,7 +43,11 @@ export default async function ClosingCalls({
   const closers: CloserOption[] = hubUsers
     .map((u) => {
       const first = u.name?.trim().split(/\s+/)[0];
-      return { email: u.email, name: first || u.email.split("@")[0] };
+      return {
+        email: u.email,
+        name: first || u.email.split("@")[0],
+        profilePictureUrl: u.profilePictureUrl,
+      };
     })
     .sort((a, b) => {
       if (a.email === ADMIN_EMAIL) return -1;
@@ -63,6 +70,7 @@ export default async function ClosingCalls({
         closers={closers}
         activeCloser={activeCloser}
         isAdmin={isAdmin}
+        timezone={timezone}
       />
     </section>
   );

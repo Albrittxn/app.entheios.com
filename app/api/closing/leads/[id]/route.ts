@@ -2,7 +2,9 @@
 // date / notes. Auth gate is handled by proxy.ts (only allows authed sessions).
 
 import { NextResponse } from "next/server";
-import { patchLead, readStoredLeads } from "@/lib/closing-leads-store";
+import { deleteLead, patchLead, readStoredLeads } from "@/lib/closing-leads-store";
+import { getSession } from "@/lib/auth";
+import { isAdminEmail } from "@/lib/permissions";
 import {
   LEAD_OBJECTIONS,
   LEAD_STATUSES,
@@ -70,6 +72,36 @@ export async function PATCH(
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Update failed" },
+      { status: 500 },
+    );
+  }
+
+  return NextResponse.json({ ok: true });
+}
+
+export async function DELETE(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
+  if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
+
+  const session = await getSession();
+  if (!session?.email)
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!isAdminEmail(session.email))
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  const all = await readStoredLeads();
+  if (!all.find((l) => l.id === id)) {
+    return NextResponse.json({ error: "Lead not found" }, { status: 404 });
+  }
+
+  try {
+    await deleteLead(id);
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Delete failed" },
       { status: 500 },
     );
   }

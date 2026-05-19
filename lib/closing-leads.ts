@@ -102,13 +102,25 @@ export function splitUpcomingPast(leads: Lead[]) {
   return { upcoming, past };
 }
 
-export function formatMeetingTime(iso: string): string {
+export function formatMeetingTime(iso: string, timeZone?: string): string {
   const d = new Date(iso);
-  return d.toLocaleString(undefined, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  try {
+    return d.toLocaleString(undefined, {
+      timeZone: timeZone || undefined,
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  } catch (e) {
+    // Fallback if timezone is invalid
+    return d.toLocaleString(undefined, {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  }
 }

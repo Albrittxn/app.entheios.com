@@ -18,7 +18,7 @@ import { cn } from "@/lib/utils";
 
 const expandTransition = { duration: 0.28, ease: [0.22, 1, 0.36, 1] as const };
 
-export type CloserOption = { email: string; name: string };
+export type CloserOption = { email: string; name: string; profilePictureUrl?: string };
 
 type Tab = "upcoming" | "past" | "calendar";
 
@@ -28,12 +28,14 @@ export function CallsList({
   closers,
   activeCloser,
   isAdmin,
+  timezone,
 }: {
   upcoming: Lead[];
   past: Lead[];
   closers?: CloserOption[];
   activeCloser?: string;
   isAdmin?: boolean;
+  timezone?: string;
 }) {
   const [tab, setTab] = useState<Tab>("upcoming");
   const [pendingOpenId, setPendingOpenId] = useState<string | null>(null);
@@ -125,7 +127,7 @@ export function CallsList({
           {tab === "upcoming" ? "No upcoming calls yet." : "No past calls yet."}
         </div>
       ) : (
-        <CallsTable leads={leads} initialOpenId={pendingOpenId} />
+        <CallsTable leads={leads} initialOpenId={pendingOpenId} timezone={timezone} isAdmin={isAdmin} />
       )}
     </section>
   );
@@ -138,12 +140,13 @@ function CloserFilterChips({
   closers: CloserOption[];
   active: string;
 }) {
-  const options = [
+  const options: Array<{ key: string; label: string; href: string; profilePictureUrl?: string }> = [
     { key: "all", label: "All closers", href: "/closing/calls" },
     ...closers.map((c) => ({
       key: c.email,
       label: c.name,
       href: `/closing/calls?closer=${encodeURIComponent(c.email)}`,
+      profilePictureUrl: c.profilePictureUrl,
     })),
   ];
   return (
@@ -155,12 +158,23 @@ function CloserFilterChips({
             key={o.key}
             href={o.href}
             className={cn(
-              "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+              "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors",
               selected
                 ? "border-zinc-900 bg-zinc-900 text-white dark:border-zinc-100 dark:bg-zinc-100 dark:text-zinc-900"
                 : "border-zinc-300 bg-white text-zinc-700 hover:border-gold/40 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-gold/40 dark:hover:bg-zinc-800",
             )}
           >
+            {o.profilePictureUrl ? (
+              <img
+                src={o.profilePictureUrl}
+                alt={o.label}
+                className="h-4.5 w-4.5 rounded-full object-cover shrink-0 border border-zinc-200 dark:border-zinc-800"
+              />
+            ) : o.key !== "all" ? (
+              <div className="flex h-4.5 w-4.5 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-[9px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                {o.label.charAt(0).toUpperCase()}
+              </div>
+            ) : null}
             {o.label}
           </Link>
         );
@@ -180,7 +194,17 @@ function CalendarIcon() {
   );
 }
 
-function CallsTable({ leads, initialOpenId }: { leads: Lead[]; initialOpenId?: string | null }) {
+function CallsTable({
+  leads,
+  initialOpenId,
+  timezone,
+  isAdmin,
+}: {
+  leads: Lead[];
+  initialOpenId?: string | null;
+  timezone?: string;
+  isAdmin?: boolean;
+}) {
   const [openId, setOpenId] = useState<string | null>(initialOpenId ?? null);
   return (
     <ul className="divide-y divide-zinc-200 overflow-hidden rounded-xl border border-zinc-200 bg-white dark:divide-zinc-800 dark:border-zinc-800 dark:bg-zinc-950">
@@ -207,7 +231,7 @@ function CallsTable({ leads, initialOpenId }: { leads: Lead[]; initialOpenId?: s
                   {lead.name || "Unnamed lead"}
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400">
-                  <span>{formatMeetingTime(lead.meetingTimeIso)}</span>
+                  <span>{formatMeetingTime(lead.meetingTimeIso, timezone)}</span>
                   {lead.rescheduled && (
                     <span className="inline-flex items-center rounded-full bg-cyan-100 px-2 py-0.5 text-[11px] font-medium text-cyan-700 ring-1 ring-inset ring-cyan-300 dark:bg-cyan-400/15 dark:text-cyan-300 dark:ring-cyan-400/30">
                       Rescheduled
@@ -250,7 +274,7 @@ function CallsTable({ leads, initialOpenId }: { leads: Lead[]; initialOpenId?: s
                   className="overflow-hidden border-t border-zinc-200 bg-zinc-50/40 dark:border-zinc-800 dark:bg-zinc-950/40"
                 >
                   <div className="px-4 py-5 sm:px-5 sm:py-6">
-                    <LeadDetail lead={lead} />
+                    <LeadDetail lead={lead} timezone={timezone} isAdmin={isAdmin} />
                   </div>
                 </motion.section>
               )}

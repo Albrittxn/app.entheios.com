@@ -33,6 +33,8 @@ export type AllowedEmail = {
   /** Display name captured on first sign-in. Undefined for users who
    *  haven't completed onboarding yet. */
   name?: string;
+  profilePictureUrl?: string;
+  timezone?: string;
 };
 
 export function isAdminEmail(email: string | undefined | null): boolean {
@@ -54,10 +56,20 @@ async function readEmails(): Promise<AllowedEmail[]> {
     })
     .map((r) => {
       const name = typeof r.name === "string" ? r.name.trim() : undefined;
+      const profilePictureUrl =
+        typeof (r as { profilePictureUrl?: unknown }).profilePictureUrl === "string"
+          ? (r as { profilePictureUrl: string }).profilePictureUrl.trim()
+          : undefined;
+      const timezone =
+        typeof (r as { timezone?: unknown }).timezone === "string"
+          ? (r as { timezone: string }).timezone.trim()
+          : undefined;
       return {
         email: r.email.toLowerCase(),
         added_at: typeof r.added_at === "string" ? r.added_at : new Date().toISOString(),
         ...(name ? { name } : {}),
+        ...(profilePictureUrl ? { profilePictureUrl } : {}),
+        ...(timezone ? { timezone } : {}),
       };
     });
 }
@@ -83,11 +95,19 @@ export async function getUserRecord(
     row = { email: ADMIN_EMAIL, added_at: new Date(0).toISOString() };
   }
   if (!row) return null;
-  // Local dev: the display name lives in the file-backed KV store because
-  // there's no Edge Config to write to. Overlay it on read.
-  if (!row.name && !edgeConfigWritable()) {
-    const local = await kvGet<{ name?: string }>(localNameKey(e));
-    if (local?.name) row = { ...row, name: local.name };
+  // Local dev: the display name, profile picture, and timezone live in the
+  // file-backed KV store because there's no Edge Config to write to. Overlay on read.
+  if (!edgeConfigWritable()) {
+    const local = await kvGet<{
+      name?: string;
+      profilePictureUrl?: string;
+      timezone?: string;
+    }>(localNameKey(e));
+    if (local) {
+      if (local.name) row = { ...row, name: local.name };
+      if (local.profilePictureUrl) row = { ...row, profilePictureUrl: local.profilePictureUrl };
+      if (local.timezone) row = { ...row, timezone: local.timezone };
+    }
   }
   return row;
 }
@@ -190,6 +210,66 @@ export async function setUserName(
     next = list.map((r) => (r.email === email ? row : r));
   } else if (email === ADMIN_EMAIL) {
     row = { email, added_at: new Date().toISOString(), name };
+    next = [...list, row];
+  } else {
+    throw new Error("Email is not on the allowlist.");
+  }
+  await writeEmails(next);
+  return row;
+}
+
+export async function updateUserProfile(
+  rawEmail: string,
+  updates: { name?: string; profilePictureUrl?: string; timezone?: string },
+): Promise<AllowedEmail> {
+  const email = rawEmail.toLowerCase().trim();
+  if (!email) throw new Error("Email is required.");
+
+  const name = updates.name?.trim();
+  const profilePictureUrl = updates.profilePictureUrl?.trim();
+  const timezone = updates.timezone?.trim();
+
+  if (name && name.length > 64) throw new Error("Name is too long (max 64 chars).");
+  if (profilePictureUrl && profilePictureUrl.length > 512)
+    throw new Error("Profile picture URL is too long (max 512 chars).");
+  if (timezone && timezone.length > 64) throw new Error("Timezone is too long.");
+
+  const patch: Partial<AllowedEmail> = {};
+  if (name !== undefined) patch.name = name || undefined;
+  if (profilePictureUrl !== undefined) patch.profilePictureUrl = profilePictureUrl || undefined;
+  if (timezone !== undefined) patch.timezone = timezone || undefined;
+
+  // Local dev (no Edge Config write creds): persist in the file-backed KV store.
+  if (!edgeConfigWritable()) {
+    const key = localNameKey(email);
+    const existingLocal = (await kvGet<{
+      name?: string;
+      profilePictureUrl?: string;
+      timezone?: string;
+    }>(key)) ?? {};
+    const updatedLocal = { ...existingLocal, ...patch };
+    await kvPut(key, updatedLocal);
+
+    const list = await readEmails();
+    const existing = list.find((r) => r.email === email);
+    return {
+      email,
+      added_at: existing?.added_at ?? new Date(0).toISOString(),
+      name: updatedLocal.name,
+      profilePictureUrl: updatedLocal.profilePictureUrl,
+      timezone: updatedLocal.timezone,
+    };
+  }
+
+  const list = await readEmails();
+  const existing = list.find((r) => r.email === email);
+  let next: AllowedEmail[];
+  let row: AllowedEmail;
+  if (existing) {
+    row = { ...existing, ...patch };
+    next = list.map((r) => (r.email === email ? row : r));
+  } else if (email === ADMIN_EMAIL) {
+    row = { email, added_at: new Date().toISOString(), ...patch };
     next = [...list, row];
   } else {
     throw new Error("Email is not on the allowlist.");

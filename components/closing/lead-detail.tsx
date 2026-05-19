@@ -15,7 +15,7 @@ import { LEAD_OBJECTIONS, LEAD_STATUSES, formatMeetingTime } from "@/lib/closing
 import { useToast } from "@/components/toast-provider";
 import { cn } from "@/lib/utils";
 
-export function LeadDetail({ lead }: { lead: Lead }) {
+export function LeadDetail({ lead, timezone, isAdmin }: { lead: Lead; timezone?: string; isAdmin?: boolean }) {
   const showPipeline =
     !!lead.annualClosings || !!lead.avgSalePrice || !!lead.bottleneck;
 
@@ -24,14 +24,14 @@ export function LeadDetail({ lead }: { lead: Lead }) {
       {/* LEFT — read-only context, definition-list style */}
       <div className="space-y-4 text-sm">
         <SourceBadge source={lead.source} bookedAt={lead.createdAt ?? lead.updatedAt} />
-        <DetailList lead={lead} showPipeline={showPipeline} />
+        <DetailList lead={lead} showPipeline={showPipeline} timezone={timezone} />
         <MediaRow lead={lead} />
         <ProspectNotes source={lead.source} text={lead.bookerMessage} />
       </div>
 
       {/* RIGHT — closer-editable form */}
       <div className="lg:pl-5">
-        <CloserForm lead={lead} />
+        <CloserForm lead={lead} isAdmin={isAdmin} />
       </div>
     </div>
   );
@@ -86,9 +86,11 @@ function ProspectNotes({ source, text }: { source: LeadSource; text?: string }) 
 function DetailList({
   lead,
   showPipeline,
+  timezone,
 }: {
   lead: Lead;
   showPipeline: boolean;
+  timezone?: string;
 }) {
   const rows: Array<{ label: string; value: React.ReactNode; group?: "contact" | "lead" | "pipeline" }> = [];
 
@@ -110,7 +112,7 @@ function DetailList({
       group: "contact",
     });
 
-  rows.push({ label: "Meeting", value: <span className="font-medium text-zinc-900 dark:text-zinc-100">{formatMeetingTime(lead.meetingTimeIso)}</span>, group: "lead" });
+  rows.push({ label: "Meeting", value: <span className="font-medium text-zinc-900 dark:text-zinc-100">{formatMeetingTime(lead.meetingTimeIso, timezone)}</span>, group: "lead" });
   if (lead.brokerage) rows.push({ label: "Brokerage", value: <span className="font-medium text-zinc-900 dark:text-zinc-100">{lead.brokerage}</span>, group: "lead" });
   if (lead.market) rows.push({ label: lead.source === "inbound" ? "Market" : "State", value: <span className="font-medium text-zinc-900 dark:text-zinc-100">{lead.market}</span>, group: "lead" });
 
@@ -233,7 +235,7 @@ function MediaChip({
 
 // ── right-side editable form ───────────────────────────────────────────
 
-function CloserForm({ lead }: { lead: Lead }) {
+function CloserForm({ lead, isAdmin }: { lead: Lead; isAdmin?: boolean }) {
   const router = useRouter();
   const { show } = useToast();
   const [status, setStatus] = useState<LeadStatus>(lead.status);
@@ -273,6 +275,32 @@ function CloserForm({ lead }: { lead: Lead }) {
       router.refresh();
     } catch (err) {
       show(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (
+      !confirm(
+        `Are you sure you want to delete the meeting for "${lead.name || "Unnamed lead"}"?\n\nThis cannot be undone.`,
+      )
+    )
+      return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/closing/leads/${encodeURIComponent(lead.id)}`, {
+        method: "DELETE",
+        credentials: "same-origin",
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error ?? `Delete failed (${res.status})`);
+      }
+      show("Meeting deleted");
+      router.refresh();
+    } catch (err) {
+      show(err instanceof Error ? err.message : "Delete failed");
     } finally {
       setSaving(false);
     }
@@ -352,23 +380,38 @@ function CloserForm({ lead }: { lead: Lead }) {
         />
       </div>
 
-      <div className="flex items-center justify-end gap-3 pt-1">
-        {dirty && !saving && (
-          <span className="text-[11px] text-zinc-500 dark:text-zinc-500">Unsaved changes</span>
-        )}
-        <button
-          type="button"
-          onClick={save}
-          disabled={!dirty || saving}
-          className={cn(
-            "inline-flex h-9 items-center rounded-md px-4 text-xs font-semibold",
-            "bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200",
-            "disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-400 dark:disabled:bg-zinc-800 dark:disabled:text-zinc-600",
+      <div className="flex items-center justify-between border-t border-zinc-100 pt-4 dark:border-zinc-900">
+        <div>
+          {isAdmin && (
+            <button
+              type="button"
+              disabled={saving}
+              onClick={handleDelete}
+              className="inline-flex h-9 items-center rounded-md border border-rose-300 bg-white px-4 text-xs font-semibold text-rose-600 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-50 dark:border-rose-900/50 dark:bg-zinc-950 dark:text-rose-400 dark:hover:bg-rose-950/20"
+            >
+              Delete Call
+            </button>
           )}
-        >
-          {saving ? "Saving…" : "Save"}
-        </button>
+        </div>
+        <div className="flex items-center gap-3">
+          {dirty && !saving && (
+            <span className="text-[11px] text-zinc-500 dark:text-zinc-500">Unsaved changes</span>
+          )}
+          <button
+            type="button"
+            onClick={save}
+            disabled={!dirty || saving}
+            className={cn(
+              "inline-flex h-9 items-center rounded-md px-4 text-xs font-semibold",
+              "bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200",
+              "disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-400 dark:disabled:bg-zinc-800 dark:disabled:text-zinc-600",
+            )}
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
       </div>
     </div>
   );
 }
+

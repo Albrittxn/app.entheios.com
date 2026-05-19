@@ -54,6 +54,14 @@ export async function clearStoredLeads(): Promise<void> {
   await writeStoredLeads([]);
 }
 
+// Delete a single lead from storage by id. Admin-only operation.
+export async function deleteLead(id: string): Promise<void> {
+  const all = await readStoredLeads();
+  const next = all.filter((l) => l.id !== id);
+  if (next.length === all.length) return; // not found
+  await writeStoredLeads(next);
+}
+
 // Upsert keyed by id. New leads get appended; existing leads are merged so
 // closer-edited fields (status/objections/followUpDate/notes) aren't clobbered
 // by re-deliveries of the same booking.

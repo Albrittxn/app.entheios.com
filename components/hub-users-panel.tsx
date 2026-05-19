@@ -16,6 +16,7 @@ type HubUser = {
   added_at: string;
   hubs: HubId[];
   isAdmin: boolean;
+  profilePictureUrl?: string;
 };
 
 function splitName(
@@ -337,12 +338,25 @@ export function HubUsersPanel({ hub, label }: { hub: HubId; label: string }) {
               ) : (
                 <div className="flex flex-col gap-2.5">
                   <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                        {u.name?.trim() || u.email.split("@")[0]}
-                      </div>
-                      <div className="truncate font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
-                        {u.email} · joined {u.added_at.slice(0, 10)}
+                    <div className="min-w-0 flex items-center gap-3">
+                      {u.profilePictureUrl ? (
+                        <img
+                          src={u.profilePictureUrl}
+                          alt={u.name || u.email}
+                          className="h-10 w-10 rounded-full object-cover border border-zinc-200 dark:border-zinc-800 shrink-0"
+                        />
+                      ) : (
+                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-100 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400 shrink-0">
+                          {(u.name || u.email).charAt(0).toUpperCase()}
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                          {u.name?.trim() || u.email.split("@")[0]}
+                        </div>
+                        <div className="truncate font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
+                          {u.email} · joined {u.added_at.slice(0, 10)}
+                        </div>
                       </div>
                     </div>
                     {u.isAdmin && (
