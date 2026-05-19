@@ -163,11 +163,6 @@ function CloserFilterChips({
                 : "border-zinc-300 bg-white text-zinc-700 hover:border-gold/40 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-gold/40 dark:hover:bg-zinc-800",
             )}
           >
-            {o.key !== "all" && (
-              <div className="flex h-4.5 w-4.5 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-[9px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
-                {o.label.charAt(0).toUpperCase()}
-              </div>
-            )}
             {o.label}
           </Link>
         );

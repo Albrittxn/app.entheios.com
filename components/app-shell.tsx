@@ -116,9 +116,6 @@ export function AppShell({
               aria-label="Logged in user"
               title={actorEmail}
             >
-              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-[10px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
-                {displayName.charAt(0).toUpperCase()}
-              </div>
               {displayName}
               {admin && (
                 <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-700 ring-1 ring-inset ring-emerald-500/30 dark:text-emerald-300">
