@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+/* Class-based dark mode (Tailwind 4 custom variant). Set/cleared by the
+   ThemeProvider via the `dark` class on <html>. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* Entheios brand palette — white/black base, no warm tones. */
+  --color-cream: #ffffff;
+  --color-cream-dim: #fafafa;
+  --color-ink: #0a0a0a;
+  --color-ink-soft: #1a1a1a;
+  --color-mute: #525252;
+  --color-faint: #a3a3a3;
+  --color-line: #e5e5e5;
+  --color-line-strong: #d4d4d4;
+
+  /* Monochrome accent — black in light, white in dark (see :where(.dark)
+     override below). Token names kept as `gold*` for legacy reasons. */
+  --color-gold: #0a0a0a;
+  --color-gold-soft: #262626;
+  --color-gold-deep: #000000;
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}
+
+:root { color-scheme: light; }
+:where(.dark) {
+  color-scheme: dark;
+  --color-gold: #fafafa;
+  --color-gold-soft: #ffffff;
+  --color-gold-deep: #ffffff;
+}
+
+html,
+body {
+  background: var(--color-cream);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+/* In dark mode the (authed) shell flips to black; the login page overrides
+   this back to cream via its own wrapper so the brand palette is preserved. */
+html.dark,
+html.dark body {
+  background: #000;
+  color: #fafafa;
+}
+
+::selection {
+  background: var(--color-ink);
+  color: var(--color-cream);
+}
+
+/* Animated grain texture used on top of the FlowyBackdrop. */
+@layer utilities {
+  .grain-live {
+    pointer-events: none;
+    opacity: 0.045;
+    mix-blend-mode: multiply;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.7 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    background-size: 200px 200px;
+    animation: grain-drift 12s steps(6) infinite;
+  }
+}
+
+@keyframes grain-drift {
+  0% { transform: translate(0, 0); }
+  20% { transform: translate(-12px, 8px); }
+  40% { transform: translate(8px, -10px); }
+  60% { transform: translate(-6px, -8px); }
+  80% { transform: translate(10px, 6px); }
+  100% { transform: translate(0, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .grain-live { animation: none; }
+}
