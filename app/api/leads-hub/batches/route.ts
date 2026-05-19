@@ -1,0 +1,107 @@
+import { NextResponse } from "next/server";
+import { getSession } from "@/lib/auth";
+import { getEffectiveUser } from "@/lib/effective-user";
+import { isAdminEmail } from "@/lib/permissions";
+import {
+  listLeadsHubBatches,
+  addLeadsHubBatch,
+  deleteLeadsHubBatch,
+  randomId,
+  type LeadsHubBatch,
+  type LeadsHubLead,
+} from "@/lib/leads-hub-store";
+import {
+  formatName,
+  formatPhone,
+  formatEmail,
+  formatBrokerage,
+  formatState,
+} from "@/lib/format";
+
+export async function GET() {
+  const ctx = await getEffectiveUser();
+  if (!ctx) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const index = await listLeadsHubBatches();
+  return NextResponse.json({ batches: index });
+}
+
+export async function POST(req: Request) {
+  const session = await getSession();
+  if (!session?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  const b = body as {
+    id?: unknown;
+    name?: unknown;
+    fileName?: unknown;
+    uploadedAt?: unknown;
+    leads?: unknown;
+  };
+
+  const name = typeof b.name === "string" ? b.name.trim().slice(0, 120) : "";
+  const fileName = typeof b.fileName === "string" ? b.fileName.trim() : "";
+  const rawLeads = Array.isArray(b.leads) ? b.leads : [];
+
+  if (!name) return NextResponse.json({ error: "Name required" }, { status: 400 });
+  if (rawLeads.length === 0) {
+    return NextResponse.json({ error: "No leads provided" }, { status: 400 });
+  }
+
+  const batchId = typeof b.id === "string" && b.id ? b.id : `lhb_${randomId(8)}`;
+  const uploadedAt = typeof b.uploadedAt === "string" && b.uploadedAt ? b.uploadedAt : new Date().toISOString();
+
+  // Deduplicate phone numbers within the imported file itself, and format fields
+  const formattedLeads: LeadsHubLead[] = [];
+  const phonesSeen = new Set<string>();
+
+  for (const raw of rawLeads) {
+    const r = raw as Record<string, unknown>;
+    const phone = formatPhone(String(r.phone ?? ""));
+    if (!phone || phonesSeen.has(phone)) continue;
+    phonesSeen.add(phone);
+
+    formattedLeads.push({
+      id: typeof r.id === "string" && r.id ? r.id : `lhl_${randomId(8)}`,
+      firstName: formatName(String(r.firstName ?? "")),
+      lastName: formatName(String(r.lastName ?? "")),
+      email: formatEmail(String(r.email ?? "")),
+      phone,
+      brokerage: formatBrokerage(String(r.brokerage ?? "")),
+      state: formatState(String(r.state ?? "")),
+      addedAt: typeof r.addedAt === "string" && r.addedAt ? r.addedAt : uploadedAt,
+      batchId,
+      batchName: name,
+    });
+  }
+
+  const meta: LeadsHubBatch = {
+    id: batchId,
+    name,
+    fileName,
+    leadCount: formattedLeads.length,
+    columns: ["firstName", "lastName", "email", "phone", "brokerage", "state"],
+    uploadedAt,
+    uploadedBy: session.email.toLowerCase(),
+  };
+
+  await addLeadsHubBatch(meta, formattedLeads);
+  return NextResponse.json({ ok: true, batch: meta, leads: formattedLeads });
+}
+
+export async function DELETE(req: Request) {
+  const session = await getSession();
+  if (!session?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const url = new URL(req.url);
+  const id = url.searchParams.get("id");
+  if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
+
+  await deleteLeadsHubBatch(id);
+  return NextResponse.json({ ok: true });
+}
