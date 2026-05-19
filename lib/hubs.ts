@@ -62,6 +62,7 @@ export const HUBS: Record<HubId, Hub> = {
       { id: "systems", href: "/closing/systems", label: "Systems" },
       { id: "slides", href: "/closing/slides", label: "Slides" },
       { id: "notes", href: "/closing/notes", label: "Notes" },
+      { id: "settings", href: "/closing/settings", label: "Settings" },
       { id: "admin", href: "/closing/admin", label: "Admin", adminOnly: true },
     ],
   },
