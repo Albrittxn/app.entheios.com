@@ -12,7 +12,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let body: { name?: string; profilePictureUrl?: string; timezone?: string };
+  let body: { name?: string; timezone?: string };
   try {
     body = await req.json();
   } catch {
@@ -20,22 +20,16 @@ export async function POST(req: Request) {
   }
 
   const name = body.name !== undefined ? String(body.name ?? "").trim() : undefined;
-  const profilePictureUrl =
-    body.profilePictureUrl !== undefined
-      ? String(body.profilePictureUrl ?? "").trim()
-      : undefined;
   const timezone = body.timezone !== undefined ? String(body.timezone ?? "").trim() : undefined;
 
   try {
     const row = await updateUserProfile(session.email, {
       name,
-      profilePictureUrl,
       timezone,
     });
     return NextResponse.json({
       ok: true,
       name: row.name,
-      profilePictureUrl: row.profilePictureUrl,
       timezone: row.timezone,
     });
   } catch (err) {

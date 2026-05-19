@@ -15,7 +15,6 @@ export type RawUser = {
   added_at: string;
   name?: string;
   hubs?: HubId[];
-  profilePictureUrl?: string;
   timezone?: string;
 };
 
@@ -46,10 +45,6 @@ async function readUsers(): Promise<RawUser[]> {
     )
     .map((r) => {
       const name = typeof r.name === "string" && r.name.trim() ? r.name.trim() : undefined;
-      const profilePictureUrl =
-        typeof (r as { profilePictureUrl?: unknown }).profilePictureUrl === "string"
-          ? (r as { profilePictureUrl: string }).profilePictureUrl.trim()
-          : undefined;
       const timezone =
         typeof (r as { timezone?: unknown }).timezone === "string"
           ? (r as { timezone: string }).timezone.trim()
@@ -59,7 +54,6 @@ async function readUsers(): Promise<RawUser[]> {
         added_at: typeof r.added_at === "string" ? r.added_at : new Date().toISOString(),
         ...(name ? { name } : {}),
         hubs: sanitizeHubs((r as { hubs?: unknown }).hubs),
-        ...(profilePictureUrl ? { profilePictureUrl } : {}),
         ...(timezone ? { timezone } : {}),
       };
     });
@@ -81,7 +75,6 @@ async function writeUsers(users: RawUser[]): Promise<void> {
       email: u.email,
       added_at: u.added_at,
       ...(u.name ? { name: u.name } : {}),
-      ...(u.profilePictureUrl ? { profilePictureUrl: u.profilePictureUrl } : {}),
       ...(u.timezone ? { timezone: u.timezone } : {}),
     };
     if (u.hubs && u.hubs.length) next.hubs = u.hubs;

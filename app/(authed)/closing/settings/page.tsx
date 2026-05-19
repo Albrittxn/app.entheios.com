@@ -9,7 +9,6 @@ export default async function ClosingSettings() {
 
   const record = ctx?.effectiveEmail ? await getUserRecord(ctx.effectiveEmail) : null;
   const initialName = record?.name ?? record?.email.split("@")[0] ?? "";
-  const initialProfilePictureUrl = record?.profilePictureUrl ?? "";
   const initialTimezone = record?.timezone ?? "";
 
   return (
@@ -24,7 +23,6 @@ export default async function ClosingSettings() {
       <div className="max-w-2xl">
         <PreferencesForm
           initialName={initialName}
-          initialProfilePictureUrl={initialProfilePictureUrl}
           initialTimezone={initialTimezone}
         />
       </div>

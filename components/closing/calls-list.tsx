@@ -18,7 +18,7 @@ import { cn } from "@/lib/utils";
 
 const expandTransition = { duration: 0.28, ease: [0.22, 1, 0.36, 1] as const };
 
-export type CloserOption = { email: string; name: string; profilePictureUrl?: string };
+export type CloserOption = { email: string; name: string };
 
 type Tab = "upcoming" | "past" | "calendar";
 
@@ -140,13 +140,12 @@ function CloserFilterChips({
   closers: CloserOption[];
   active: string;
 }) {
-  const options: Array<{ key: string; label: string; href: string; profilePictureUrl?: string }> = [
+  const options = [
     { key: "all", label: "All closers", href: "/closing/calls" },
     ...closers.map((c) => ({
       key: c.email,
       label: c.name,
       href: `/closing/calls?closer=${encodeURIComponent(c.email)}`,
-      profilePictureUrl: c.profilePictureUrl,
     })),
   ];
   return (
@@ -164,17 +163,11 @@ function CloserFilterChips({
                 : "border-zinc-300 bg-white text-zinc-700 hover:border-gold/40 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-gold/40 dark:hover:bg-zinc-800",
             )}
           >
-            {o.profilePictureUrl ? (
-              <img
-                src={o.profilePictureUrl}
-                alt={o.label}
-                className="h-4.5 w-4.5 rounded-full object-cover shrink-0 border border-zinc-200 dark:border-zinc-800"
-              />
-            ) : o.key !== "all" ? (
+            {o.key !== "all" && (
               <div className="flex h-4.5 w-4.5 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-[9px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
                 {o.label.charAt(0).toUpperCase()}
               </div>
-            ) : null}
+            )}
             {o.label}
           </Link>
         );

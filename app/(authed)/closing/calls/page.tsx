@@ -46,7 +46,6 @@ export default async function ClosingCalls({
       return {
         email: u.email,
         name: first || u.email.split("@")[0],
-        profilePictureUrl: u.profilePictureUrl,
       };
     })
     .sort((a, b) => {

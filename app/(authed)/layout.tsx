@@ -54,7 +54,6 @@ export default async function AuthedLayout({
       actorEmail={ctx.actorEmail}
       effectiveEmail={ctx.effectiveEmail}
       displayName={displayName}
-      profilePictureUrl={record?.profilePictureUrl}
       admin={admin}
       impersonating={ctx.impersonating}
       availableHubs={availableHubs}

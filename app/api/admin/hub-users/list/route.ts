@@ -23,7 +23,6 @@ export async function GET(req: Request) {
       added_at: u.added_at,
       hubs: u.hubs ?? [],
       isAdmin: u.email === ADMIN_EMAIL,
-      profilePictureUrl: u.profilePictureUrl,
     })),
   });
 }

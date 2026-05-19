@@ -33,7 +33,6 @@ export type AllowedEmail = {
   /** Display name captured on first sign-in. Undefined for users who
    *  haven't completed onboarding yet. */
   name?: string;
-  profilePictureUrl?: string;
   timezone?: string;
 };
 
@@ -56,10 +55,6 @@ async function readEmails(): Promise<AllowedEmail[]> {
     })
     .map((r) => {
       const name = typeof r.name === "string" ? r.name.trim() : undefined;
-      const profilePictureUrl =
-        typeof (r as { profilePictureUrl?: unknown }).profilePictureUrl === "string"
-          ? (r as { profilePictureUrl: string }).profilePictureUrl.trim()
-          : undefined;
       const timezone =
         typeof (r as { timezone?: unknown }).timezone === "string"
           ? (r as { timezone: string }).timezone.trim()
@@ -68,7 +63,6 @@ async function readEmails(): Promise<AllowedEmail[]> {
         email: r.email.toLowerCase(),
         added_at: typeof r.added_at === "string" ? r.added_at : new Date().toISOString(),
         ...(name ? { name } : {}),
-        ...(profilePictureUrl ? { profilePictureUrl } : {}),
         ...(timezone ? { timezone } : {}),
       };
     });
@@ -100,12 +94,10 @@ export async function getUserRecord(
   if (!edgeConfigWritable()) {
     const local = await kvGet<{
       name?: string;
-      profilePictureUrl?: string;
       timezone?: string;
     }>(localNameKey(e));
     if (local) {
       if (local.name) row = { ...row, name: local.name };
-      if (local.profilePictureUrl) row = { ...row, profilePictureUrl: local.profilePictureUrl };
       if (local.timezone) row = { ...row, timezone: local.timezone };
     }
   }
@@ -220,23 +212,19 @@ export async function setUserName(
 
 export async function updateUserProfile(
   rawEmail: string,
-  updates: { name?: string; profilePictureUrl?: string; timezone?: string },
+  updates: { name?: string; timezone?: string },
 ): Promise<AllowedEmail> {
   const email = rawEmail.toLowerCase().trim();
   if (!email) throw new Error("Email is required.");
 
   const name = updates.name?.trim();
-  const profilePictureUrl = updates.profilePictureUrl?.trim();
   const timezone = updates.timezone?.trim();
 
   if (name && name.length > 64) throw new Error("Name is too long (max 64 chars).");
-  if (profilePictureUrl && profilePictureUrl.length > 512)
-    throw new Error("Profile picture URL is too long (max 512 chars).");
   if (timezone && timezone.length > 64) throw new Error("Timezone is too long.");
 
   const patch: Partial<AllowedEmail> = {};
   if (name !== undefined) patch.name = name || undefined;
-  if (profilePictureUrl !== undefined) patch.profilePictureUrl = profilePictureUrl || undefined;
   if (timezone !== undefined) patch.timezone = timezone || undefined;
 
   // Local dev (no Edge Config write creds): persist in the file-backed KV store.
@@ -244,7 +232,6 @@ export async function updateUserProfile(
     const key = localNameKey(email);
     const existingLocal = (await kvGet<{
       name?: string;
-      profilePictureUrl?: string;
       timezone?: string;
     }>(key)) ?? {};
     const updatedLocal = { ...existingLocal, ...patch };
@@ -256,7 +243,6 @@ export async function updateUserProfile(
       email,
       added_at: existing?.added_at ?? new Date(0).toISOString(),
       name: updatedLocal.name,
-      profilePictureUrl: updatedLocal.profilePictureUrl,
       timezone: updatedLocal.timezone,
     };
   }
