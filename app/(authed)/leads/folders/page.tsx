@@ -27,6 +27,7 @@ export default function LeadsFoldersPage() {
   const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
   const [newFolderName, setNewFolderName] = useState("");
   const [creatingFolder, setCreatingFolder] = useState(false);
+  const [deletingFolder, setDeletingFolder] = useState<string | null>(null);
   const [status, setStatus] = useState<string>("");
 
   async function loadBatches() {
@@ -184,6 +185,31 @@ export default function LeadsFoldersPage() {
     setCollapsedFolders((prev) => ({ ...prev, [folder]: !prev[folder] }));
   }
 
+  async function removeFolder(folder: string) {
+    if (!confirm(`Delete "${folder}"? Batches inside it will be moved to Unsorted.`)) return;
+    setDeletingFolder(folder);
+    setStatus("");
+    try {
+      const res = await fetch(`/api/leads-hub/batches?folder=${encodeURIComponent(folder)}`, {
+        method: "DELETE",
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Failed to delete folder");
+      setFoldersList((prev) => prev.filter((item) => item !== folder));
+      setBatches((prev) =>
+        prev.map((batch) =>
+          batch.folder.trim() === folder ? { ...batch, folder: "" } : batch,
+        ),
+      );
+      setStatus(`Deleted "${folder}"`);
+      broadcastLeadsHubUpdate();
+    } catch (err) {
+      setStatus((err as Error).message);
+    } finally {
+      setDeletingFolder(null);
+    }
+  }
+
   async function createFolder() {
     const folder = normalizeFolderName(newFolderName);
     if (!folder) {
@@ -289,8 +315,19 @@ export default function LeadsFoldersPage() {
                       className="flex items-center gap-2 text-left"
                     >
                       <h2 className="text-base font-semibold tracking-tight">{group.folder}</h2>
-                      <span className="text-[10px] font-medium uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
-                        {collapsed ? "Show" : "Hide"}
+                      <span
+                        className={`inline-flex transition-transform duration-200 ${
+                          collapsed ? "-rotate-90" : "rotate-0"
+                        } text-zinc-400 dark:text-zinc-500`}
+                        aria-hidden="true"
+                      >
+                        <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                          <path
+                            fillRule="evenodd"
+                            d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.51a.75.75 0 01-1.08 0l-4.25-4.51a.75.75 0 01.02-1.06z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
                       </span>
                     </button>
                     <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
@@ -300,8 +337,16 @@ export default function LeadsFoldersPage() {
                   <div className="flex flex-wrap gap-2 px-4 py-4">
                     <Button
                       type="button"
+                      onClick={() => void removeFolder(group.folder)}
+                      disabled={deletingFolder === group.folder}
+                      className="h-8 bg-rose-600 text-xs text-white hover:bg-rose-700"
+                    >
+                      {deletingFolder === group.folder ? "Deleting…" : "Delete folder"}
+                    </Button>
+                    <Button
+                      type="button"
                       onClick={() => void applyFolderToGroup(group.folder, "")}
-                      disabled={busy}
+                      disabled={busy || deletingFolder === group.folder}
                       className="h-8 bg-zinc-900 text-xs text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-900"
                     >
                       Clear folder
@@ -319,12 +364,13 @@ export default function LeadsFoldersPage() {
                       setDrafts((prev) => ({ ...prev, [folderKey]: e.target.value }))
                     }
                     placeholder="Rename folder"
+                    disabled={deletingFolder === group.folder}
                     className="h-9 max-w-sm bg-white text-sm dark:bg-zinc-900"
                   />
                   <Button
                     type="button"
                     onClick={() => void applyFolderToGroup(group.folder, draft)}
-                    disabled={busy}
+                    disabled={busy || deletingFolder === group.folder}
                     className="h-9 bg-zinc-900 text-xs text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-900"
                   >
                     {busy ? "Saving…" : "Save"}

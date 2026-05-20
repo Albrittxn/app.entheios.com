@@ -6,6 +6,7 @@ import {
   listLeadsHubBatches,
   listLeadsHubFolders,
   createLeadsHubFolder,
+  deleteLeadsHubFolder,
   addLeadsHubBatch,
   deleteLeadsHubBatch,
   updateLeadsHubBatchFolder,
@@ -154,6 +155,16 @@ export async function DELETE(req: Request) {
 
   const url = new URL(req.url);
   const id = url.searchParams.get("id");
+  const folder = url.searchParams.get("folder")?.trim() ?? "";
+  if (folder) {
+    try {
+      await deleteLeadsHubFolder(folder);
+      return NextResponse.json({ ok: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to delete folder.";
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
+  }
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
   await deleteLeadsHubBatch(id);

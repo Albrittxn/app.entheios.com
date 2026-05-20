@@ -124,6 +124,39 @@ export async function createLeadsHubFolder(folder: string): Promise<string> {
   return nextFolder;
 }
 
+export async function deleteLeadsHubFolder(folder: string): Promise<void> {
+  const targetFolder = normalizeFolderName(folder);
+  if (!targetFolder) throw new Error("Folder name required");
+
+  const batches = await listLeadsHubBatches();
+  const affected = batches.filter((batch) => batch.folder.trim() === targetFolder);
+
+  if (blobConfigured()) {
+    const stored = (await readBlobJson<string[]>(foldersPath())) ?? [];
+    const nextFolders = stored.filter((item) => normalizeFolderName(item) !== targetFolder);
+    await writeBlobJson(foldersPath(), sortFolders(nextFolders));
+
+    for (const batch of affected) {
+      const meta = await readBlobJson<Partial<LeadsHubBatch> & { id: string }>(batchMetaPath(batch.id));
+      if (!meta) continue;
+      await writeBlobJson(batchMetaPath(batch.id), {
+        ...normalizeBatchMeta(meta),
+        folder: "",
+      });
+    }
+    return;
+  }
+
+  const stored = (await kvGet<string[]>("leads_hub_folders")) ?? [];
+  const nextFolders = stored.filter((item) => normalizeFolderName(item) !== targetFolder);
+  await kvPut("leads_hub_folders", sortFolders(nextFolders));
+
+  const nextIndex = batches.map((batch) =>
+    batch.folder.trim() === targetFolder ? { ...batch, folder: "" } : batch,
+  );
+  await kvPut("leads_hub_batches_index", nextIndex);
+}
+
 export async function listLeadsHubBatches(): Promise<LeadsHubBatch[]> {
   if (blobConfigured()) {
     const blobs: { pathname: string }[] = [];
