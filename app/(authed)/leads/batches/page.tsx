@@ -32,6 +32,7 @@ export default function LeadsBatchesPage() {
   const toast = useToast();
 
   const [batches, setBatches] = useState<LeadsHubBatch[]>([]);
+  const [folders, setFolders] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
@@ -54,8 +55,9 @@ export default function LeadsBatchesPage() {
     try {
       const res = await fetch("/api/leads-hub/batches", { credentials: "same-origin" });
       if (res.ok) {
-        const data = await res.json();
+        const data = (await res.json()) as { batches?: LeadsHubBatch[]; folders?: string[] };
         setBatches(data.batches || []);
+        setFolders(data.folders || []);
       }
     } catch (err) {
       console.error("Failed to load batches:", err);
@@ -80,10 +82,10 @@ export default function LeadsBatchesPage() {
 
   const folderSuggestions = useMemo(
     () =>
-      [...new Set(batches.map((batch) => batch.folder.trim()).filter(Boolean))].sort((a, b) =>
+      [...new Set([...folders, ...batches.map((batch) => batch.folder.trim())].filter(Boolean))].sort((a, b) =>
         a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }),
       ),
-    [batches],
+    [batches, folders],
   );
 
   useLeadsHubSync(() => {

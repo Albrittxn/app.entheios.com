@@ -18,20 +18,24 @@ function normalizeFolderName(value: string): string {
 
 export default function LeadsFoldersPage() {
   const [batches, setBatches] = useState<LeadsHubBatch[]>([]);
+  const [foldersList, setFoldersList] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [batchDrafts, setBatchDrafts] = useState<Record<string, string>>({});
   const [busyFolders, setBusyFolders] = useState<Record<string, boolean>>({});
   const [movingBatchIds, setMovingBatchIds] = useState<Record<string, boolean>>({});
   const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
+  const [newFolderName, setNewFolderName] = useState("");
+  const [creatingFolder, setCreatingFolder] = useState(false);
   const [status, setStatus] = useState<string>("");
 
   async function loadBatches() {
     try {
       const res = await fetch("/api/leads-hub/batches", { credentials: "same-origin" });
       if (!res.ok) return;
-      const data = (await res.json()) as { batches: LeadsHubBatch[] };
+      const data = (await res.json()) as { batches: LeadsHubBatch[]; folders?: string[] };
       setBatches(data.batches || []);
+      setFoldersList(data.folders || []);
     } finally {
       setLoading(false);
     }
@@ -65,14 +69,18 @@ export default function LeadsFoldersPage() {
 
   const folderSuggestions = useMemo(
     () =>
-      [...new Set(batches.map((batch) => batch.folder.trim()).filter(Boolean))].sort((a, b) =>
+      [...new Set([...foldersList, ...batches.map((batch) => batch.folder.trim())].filter(Boolean))].sort((a, b) =>
         a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }),
       ),
-    [batches],
+    [batches, foldersList],
   );
 
   const folders = useMemo<FolderGroup[]>(() => {
     const map = new Map<string, LeadsHubBatch[]>();
+    for (const folder of foldersList) {
+      const key = folder.trim();
+      if (key) map.set(key, map.get(key) ?? []);
+    }
     for (const batch of batches) {
       const key = batch.folder.trim();
       if (!key) continue;
@@ -93,7 +101,7 @@ export default function LeadsFoldersPage() {
         if (!b.folder) return 1;
         return a.folder.localeCompare(b.folder);
       });
-  }, [batches]);
+  }, [batches, foldersList]);
 
   async function saveFolderForBatch(batch: LeadsHubBatch, folder: string) {
     const nextFolder = normalizeFolderName(folder);
@@ -176,6 +184,43 @@ export default function LeadsFoldersPage() {
     setCollapsedFolders((prev) => ({ ...prev, [folder]: !prev[folder] }));
   }
 
+  async function createFolder() {
+    const folder = normalizeFolderName(newFolderName);
+    if (!folder) {
+      setStatus("Folder name required.");
+      return;
+    }
+    if (folderSuggestions.includes(folder)) {
+      setStatus("That folder already exists.");
+      return;
+    }
+    setCreatingFolder(true);
+    setStatus("");
+    try {
+      const res = await fetch("/api/leads-hub/batches", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ createFolder: true, folder }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string; folder?: string };
+      if (!res.ok) throw new Error(data.error ?? "Failed to create folder");
+      setFoldersList((prev) =>
+        [...new Set([...prev, data.folder ?? folder])].sort((a, b) =>
+          a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }),
+        ),
+      );
+      setDrafts((prev) => ({ ...prev, [folder]: folder }));
+      setCollapsedFolders((prev) => ({ ...prev, [folder]: false }));
+      setNewFolderName("");
+      setStatus(`Created "${data.folder ?? folder}"`);
+      broadcastLeadsHubUpdate();
+    } catch (err) {
+      setStatus((err as Error).message);
+    } finally {
+      setCreatingFolder(false);
+    }
+  }
+
   return (
     <section className="space-y-6">
       <header className="flex items-end justify-between gap-4">
@@ -188,6 +233,36 @@ export default function LeadsFoldersPage() {
       </header>
 
       {status && <p className="text-xs text-zinc-500 dark:text-zinc-400">{status}</p>}
+
+      <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="min-w-[220px] flex-1">
+            <label className="mb-1 block text-[11px] font-medium text-zinc-700 dark:text-zinc-300">
+              Create folder
+            </label>
+            <Input
+              value={newFolderName}
+              onChange={(e) => setNewFolderName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void createFolder();
+                }
+              }}
+              placeholder="New folder name"
+              className="h-9 bg-white text-sm dark:bg-zinc-900"
+            />
+          </div>
+          <Button
+            type="button"
+            onClick={() => void createFolder()}
+            disabled={creatingFolder}
+            className="h-9 bg-zinc-900 text-xs text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-900"
+          >
+            {creatingFolder ? "Creating…" : "Create Folder"}
+          </Button>
+        </div>
+      </div>
 
       {loading ? (
         <div className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50 p-8 text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950">
@@ -205,9 +280,9 @@ export default function LeadsFoldersPage() {
             const busy = !!busyFolders[folderKey];
             const collapsed = !!collapsedFolders[folderKey];
             return (
-              <div key={group.folder || "unsorted"} className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+              <div key={group.folder} className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
+                  <div className="px-4 py-4">
                     <button
                       type="button"
                       onClick={() => toggleFolder(folderKey)}
@@ -222,7 +297,7 @@ export default function LeadsFoldersPage() {
                       {group.items.length} batches · {group.totalLeads.toLocaleString()} leads
                     </p>
                   </div>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-2 px-4 py-4">
                     <Button
                       type="button"
                       onClick={() => void applyFolderToGroup(group.folder, "")}
@@ -236,7 +311,8 @@ export default function LeadsFoldersPage() {
 
                 {!collapsed && (
                   <>
-                <div className="mt-4 flex flex-wrap items-center gap-2">
+                <div className="border-t border-zinc-100 px-4 py-4 dark:border-zinc-900">
+                  <div className="flex flex-wrap items-center gap-2">
                   <Input
                     value={draft}
                     onChange={(e) =>
@@ -254,41 +330,53 @@ export default function LeadsFoldersPage() {
                     {busy ? "Saving…" : "Save"}
                   </Button>
                 </div>
+                </div>
 
-                <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                  {group.items.map((batch) => (
-                    <div key={batch.id} className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
-                      <div className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">{batch.name}</div>
-                      <div className="mt-0.5 truncate font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
-                        {batch.leadCount} leads · {batch.fileName}
-                      </div>
-                      <div className="mt-3 flex items-center gap-2">
-                        <Input
-                          value={batchDrafts[batch.id] ?? batch.folder}
-                          onChange={(e) =>
-                            setBatchDrafts((prev) => ({ ...prev, [batch.id]: e.target.value }))
-                          }
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              e.preventDefault();
-                              void moveSingleBatch(batch);
-                            }
-                          }}
-                          list="leads-folder-suggestions"
-                          placeholder="Move batch to folder"
-                          className="h-8 bg-white text-xs dark:bg-zinc-900"
-                        />
-                        <Button
-                          type="button"
-                          onClick={() => void moveSingleBatch(batch)}
-                          disabled={!!movingBatchIds[batch.id]}
-                          className="h-8 bg-zinc-900 px-3 text-xs text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-900"
-                        >
-                          {movingBatchIds[batch.id] ? "Moving…" : "Move"}
-                        </Button>
-                      </div>
+                <div className="border-t border-zinc-100 dark:border-zinc-900">
+                  {group.items.length === 0 ? (
+                    <div className="px-4 py-4 text-sm text-zinc-500 dark:text-zinc-400">
+                      No batches in this folder yet.
                     </div>
-                  ))}
+                  ) : (
+                    group.items.map((batch) => (
+                      <div
+                        key={batch.id}
+                        className="grid gap-3 border-b border-zinc-100 px-4 py-3 md:grid-cols-[minmax(0,1.2fr)_minmax(220px,320px)_auto] md:items-center dark:border-zinc-900"
+                      >
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{batch.name}</div>
+                          <div className="mt-0.5 truncate font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
+                            {batch.leadCount} leads · {batch.fileName}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Input
+                            value={batchDrafts[batch.id] ?? batch.folder}
+                            onChange={(e) =>
+                              setBatchDrafts((prev) => ({ ...prev, [batch.id]: e.target.value }))
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                void moveSingleBatch(batch);
+                              }
+                            }}
+                            list="leads-folder-suggestions"
+                            placeholder="Move batch to folder"
+                            className="h-8 bg-white text-xs dark:bg-zinc-900"
+                          />
+                          <Button
+                            type="button"
+                            onClick={() => void moveSingleBatch(batch)}
+                            disabled={!!movingBatchIds[batch.id]}
+                            className="h-8 bg-zinc-900 px-3 text-xs text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-900"
+                          >
+                            {movingBatchIds[batch.id] ? "Moving…" : "Move"}
+                          </Button>
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
                   </>
                 )}

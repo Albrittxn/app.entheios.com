@@ -4,6 +4,8 @@ import { getEffectiveUser } from "@/lib/effective-user";
 import { isAdminEmail } from "@/lib/permissions";
 import {
   listLeadsHubBatches,
+  listLeadsHubFolders,
+  createLeadsHubFolder,
   addLeadsHubBatch,
   deleteLeadsHubBatch,
   updateLeadsHubBatchFolder,
@@ -24,8 +26,8 @@ export const runtime = "nodejs";
 export async function GET() {
   const ctx = await getEffectiveUser();
   if (!ctx) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const index = await listLeadsHubBatches();
-  return NextResponse.json({ batches: index });
+  const [index, folders] = await Promise.all([listLeadsHubBatches(), listLeadsHubFolders()]);
+  return NextResponse.json({ batches: index, folders });
 }
 
 export async function POST(req: Request) {
@@ -46,12 +48,25 @@ export async function POST(req: Request) {
     uploadedAt?: unknown;
     folder?: unknown;
     leads?: unknown;
+    createFolder?: unknown;
   };
 
   const name = typeof b.name === "string" ? b.name.trim().slice(0, 120) : "";
   const fileName = typeof b.fileName === "string" ? b.fileName.trim() : "";
   const folder = typeof b.folder === "string" ? b.folder.trim().slice(0, 120) : "";
   const rawLeads = Array.isArray(b.leads) ? b.leads : [];
+  const createFolderOnly = Boolean(b.createFolder);
+
+  if (createFolderOnly) {
+    if (!folder) return NextResponse.json({ error: "Folder name required" }, { status: 400 });
+    try {
+      const created = await createLeadsHubFolder(folder);
+      return NextResponse.json({ ok: true, folder: created });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to create folder.";
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
+  }
 
   if (!name) return NextResponse.json({ error: "Name required" }, { status: 400 });
   if (rawLeads.length === 0) {

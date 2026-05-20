@@ -43,6 +43,10 @@ function batchMetaPath(id: string): string {
   return `leads-hub/batches/${id}/meta.json`;
 }
 
+function foldersPath(): string {
+  return "leads-hub/folders/index.json";
+}
+
 function normalizeBatchMeta(meta: Partial<LeadsHubBatch> & { id: string }): LeadsHubBatch {
   return {
     id: meta.id,
@@ -86,6 +90,40 @@ async function deleteBlob(pathname: string): Promise<void> {
   }
 }
 
+function normalizeFolderName(folder: string): string {
+  return folder.trim().slice(0, 120);
+}
+
+function sortFolders(folders: string[]): string[] {
+  return [...new Set(folders.map(normalizeFolderName).filter(Boolean))].sort((a, b) =>
+    a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }),
+  );
+}
+
+export async function listLeadsHubFolders(): Promise<string[]> {
+  const batchFolders = (await listLeadsHubBatches()).map((batch) => batch.folder);
+  if (blobConfigured()) {
+    const stored = (await readBlobJson<string[]>(foldersPath())) ?? [];
+    return sortFolders([...stored, ...batchFolders]);
+  }
+  const stored = (await kvGet<string[]>("leads_hub_folders")) ?? [];
+  return sortFolders([...stored, ...batchFolders]);
+}
+
+export async function createLeadsHubFolder(folder: string): Promise<string> {
+  const nextFolder = normalizeFolderName(folder);
+  if (!nextFolder) throw new Error("Folder name required");
+  if (!blobConfigured() && process.env.VERCEL) throw blobConfigError();
+  const current = await listLeadsHubFolders();
+  const next = sortFolders([...current, nextFolder]);
+  if (blobConfigured()) {
+    await writeBlobJson(foldersPath(), next);
+    return nextFolder;
+  }
+  await kvPut("leads_hub_folders", next);
+  return nextFolder;
+}
+
 export async function listLeadsHubBatches(): Promise<LeadsHubBatch[]> {
   if (blobConfigured()) {
     const blobs: { pathname: string }[] = [];
@@ -118,7 +156,8 @@ export async function listLeadsHubBatches(): Promise<LeadsHubBatch[]> {
 }
 
 export async function updateLeadsHubBatchFolder(id: string, folder: string): Promise<void> {
-  const nextFolder = folder.trim().slice(0, 120);
+  const nextFolder = normalizeFolderName(folder);
+  if (nextFolder) await createLeadsHubFolder(nextFolder);
   if (blobConfigured()) {
     const meta = await readBlobJson<Partial<LeadsHubBatch> & { id: string }>(batchMetaPath(id));
     if (!meta) throw new Error(`Leads Hub batch not found: ${id}`);
@@ -156,6 +195,7 @@ export async function addLeadsHubBatch(
   if (!blobConfigured() && process.env.VERCEL) {
     throw blobConfigError();
   }
+  if (meta.folder) await createLeadsHubFolder(meta.folder);
   await putLeadsHubBatch(meta.id, leads);
   if (blobConfigured()) {
     await writeBlobJson(batchMetaPath(meta.id), normalizeBatchMeta(meta));
