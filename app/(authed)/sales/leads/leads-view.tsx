@@ -128,23 +128,52 @@ export function SalesLeadsView({
   }
 
   async function markAsDownloaded(id: string) {
+    const previous = batches;
     setDownloadingIds((prev) => new Set([...prev, id]));
     try {
       const batch = batches.find((item) => item.id === id);
       const downloadUrl = `/api/sales/batches/${encodeURIComponent(id)}/csv`;
 
       if (canPersistDownloadStatus) {
-        const nextStatus = {
+        const optimisticStatus = {
           ...(optimisticStatusByIdRef.current[id] ?? batch?.status ?? {}),
           downloaded_at: Date.now(),
         };
-        optimisticStatusByIdRef.current[id] = nextStatus;
+        optimisticStatusByIdRef.current[id] = optimisticStatus;
         setBatches((prev) =>
           prev.map((x) =>
             x.id === id
               ? {
                   ...x,
-                  status: nextStatus,
+                  status: optimisticStatus,
+                }
+              : x,
+          ),
+        );
+
+        const statusResponse = await fetch(
+          `/api/sales/batches/${encodeURIComponent(id)}/complete`,
+          {
+            method: "POST",
+            credentials: "same-origin",
+          },
+        );
+        if (!statusResponse.ok) {
+          delete optimisticStatusByIdRef.current[id];
+          setBatches(previous);
+          return;
+        }
+        const statusJson = (await statusResponse.json().catch(() => ({}))) as {
+          status?: UserBatchStatus;
+        };
+        const persistedStatus = statusJson.status ?? optimisticStatus;
+        optimisticStatusByIdRef.current[id] = persistedStatus;
+        setBatches((prev) =>
+          prev.map((x) =>
+            x.id === id
+              ? {
+                  ...x,
+                  status: persistedStatus,
                 }
               : x,
           ),
