@@ -115,19 +115,12 @@ export function SalesAdminView() {
     [batches],
   );
 
-  const importedNames = useMemo(
-    () => new Set(batches.map((b) => b.name.trim().toLowerCase()).filter(Boolean)),
-    [batches],
-  );
-
   const availableHubBatches = useMemo(
     () =>
       hubBatches.filter(
-        (batch) =>
-          !importedHubIds.has(batch.id) &&
-          !importedNames.has(batch.name.trim().toLowerCase()),
+        (batch) => !importedHubIds.has(batch.id),
       ),
-    [hubBatches, importedHubIds, importedNames],
+    [hubBatches, importedHubIds],
   );
 
   const selectedHubBatches = useMemo(

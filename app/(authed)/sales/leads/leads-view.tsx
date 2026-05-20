@@ -24,6 +24,7 @@ function uiStatus(b: BatchRow): "new" | "downloaded" {
 
 type SalesLeadsViewProps = {
   isAdmin: boolean;
+  canPersistDownloadStatus: boolean;
 };
 
 type FolderGroup = {
@@ -31,7 +32,10 @@ type FolderGroup = {
   items: BatchRow[];
 };
 
-export function SalesLeadsView({ isAdmin: _isAdmin }: SalesLeadsViewProps) {
+export function SalesLeadsView({
+  isAdmin: _isAdmin,
+  canPersistDownloadStatus,
+}: SalesLeadsViewProps) {
   const [batches, setBatches] = useState<BatchRow[]>([]);
   const [filter, setFilter] = useState<Filter>("new");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
@@ -104,49 +108,60 @@ export function SalesLeadsView({ isAdmin: _isAdmin }: SalesLeadsViewProps) {
       method: "DELETE",
       credentials: "same-origin",
     });
-    if (r.ok) return;
+    if (r.ok) {
+      const j = (await r.json().catch(() => ({}))) as { status?: UserBatchStatus };
+      optimisticStatusByIdRef.current[id] = j.status ?? {};
+      setBatches((current) =>
+        current.map((batch) =>
+          batch.id === id
+            ? {
+                ...batch,
+                status: j.status ?? {},
+              }
+            : batch,
+        ),
+      );
+      return;
+    }
     delete optimisticStatusByIdRef.current[id];
     setBatches(previous);
   }
 
   async function markAsDownloaded(id: string) {
-    // Update optimistic state
-    optimisticStatusByIdRef.current[id] = {
-      ...optimisticStatusByIdRef.current[id],
-      downloaded_at: Date.now(),
-    };
-    setBatches((prev) =>
-      prev.map((x) =>
-        x.id === id
-          ? {
-              ...x,
-              status: {
-                ...x.status,
-                downloaded_at: x.status?.downloaded_at ?? Date.now(),
-              },
-            }
-          : x,
-      ),
-    );
-
-    // Persist to server
+    const previous = batches;
     setDownloadingIds((prev) => new Set([...prev, id]));
     try {
-      const r = await fetch(`/api/sales/batches/${encodeURIComponent(id)}/complete`, {
-        method: "POST",
+      const r = await fetch(`/api/sales/batches/${encodeURIComponent(id)}/csv`, {
+        method: "GET",
         credentials: "same-origin",
+        cache: "no-store",
       });
       if (!r.ok) {
-        // Revert if failed
+        setBatches(previous);
+        return;
+      }
+      const csv = await r.text();
+      const batch = batches.find((item) => item.id === id);
+      const fileName = `${(batch?.name ?? "batch").replace(/[^a-z0-9._-]+/gi, "_")}.csv`;
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+
+      if (canPersistDownloadStatus) {
+        const nextStatus = { ...(batch?.status ?? {}), downloaded_at: Date.now() };
+        optimisticStatusByIdRef.current[id] = nextStatus;
         setBatches((prev) =>
           prev.map((x) =>
             x.id === id
               ? {
                   ...x,
-                  status: {
-                    ...x.status,
-                    downloaded_at: undefined,
-                  },
+                  status: nextStatus,
                 }
               : x,
           ),

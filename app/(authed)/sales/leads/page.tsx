@@ -6,6 +6,7 @@ import { SalesLeadsView } from "./leads-view";
 export default async function SalesLeadsPage() {
   const ctx = await getEffectiveUser();
   const isAdmin = Boolean(ctx && isAdminEmail(ctx.effectiveEmail));
+  const canPersistDownloadStatus = !ctx?.impersonating;
 
   return (
     <section>
@@ -26,7 +27,7 @@ export default async function SalesLeadsPage() {
           </div>
         </div>
       )}
-      <SalesLeadsView isAdmin={isAdmin} />
+      <SalesLeadsView isAdmin={isAdmin} canPersistDownloadStatus={canPersistDownloadStatus} />
     </section>
   );
 }
