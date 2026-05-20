@@ -41,6 +41,10 @@ function batchStatusPath(email: string, batchId: string): string {
   return `sales/status/${encodeURIComponent(email.toLowerCase().trim())}/${batchId}.json`;
 }
 
+function batchFoldersPath(): string {
+  return "sales/folders/list.json";
+}
+
 function blobConfigError(): Error {
   return new Error(
     "Sales batch storage requires Vercel Blob in production. Add a Blob store to this Vercel project so BLOB_READ_WRITE_TOKEN is available.",
@@ -58,6 +62,16 @@ function normalizeBatchMeta(meta: Partial<BatchMeta> & { id: string }): BatchMet
     created_at: meta.created_at ?? Date.now(),
     created_by: meta.created_by ?? "",
   };
+}
+
+function normalizeFolderName(name: string): string {
+  return name.trim().slice(0, 120);
+}
+
+function normalizeFolderList(names: string[]): string[] {
+  return [...new Set(names.map(normalizeFolderName).filter(Boolean))].sort((a, b) =>
+    a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }),
+  );
 }
 
 async function readBlobJson<T>(pathname: string): Promise<T | null> {
@@ -202,6 +216,30 @@ export async function updateBatchFolder(id: string, folder: string): Promise<voi
   }
   const index = await listBatchIndex();
   await writeBatchIndex(index.map((item) => (item.id === id ? { ...item, folder: nextFolder } : item)));
+}
+
+export async function listBatchFolders(): Promise<string[]> {
+  const batchFolders = (await listBatchIndex()).map((item) => item.folder ?? "");
+  if (blobConfigured()) {
+    const stored = (await readBlobJson<string[]>(batchFoldersPath())) ?? [];
+    return normalizeFolderList([...stored, ...batchFolders]);
+  }
+  const stored = (await kvGet<string[]>("sales:folders")) ?? [];
+  return normalizeFolderList([...stored, ...batchFolders]);
+}
+
+export async function addBatchFolder(folderName: string): Promise<string[]> {
+  const folder = normalizeFolderName(folderName);
+  if (!folder) throw new Error("Folder name required.");
+
+  const next = normalizeFolderList([...(await listBatchFolders()), folder]);
+  if (blobConfigured()) {
+    await writeBlobJson(batchFoldersPath(), next);
+    return next;
+  }
+
+  await kvPut("sales:folders", next);
+  return next;
 }
 
 export async function getUserBatchStatus(

@@ -25,10 +25,12 @@ type LeadsHubBatch = {
 export function SalesAdminView() {
   const [batches, setBatches] = useState<BatchMeta[]>([]);
   const [hubBatches, setHubBatches] = useState<LeadsHubBatch[]>([]);
+  const [folders, setFolders] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [hubLoading, setHubLoading] = useState(true);
   const [name, setName] = useState("");
   const [folder, setFolder] = useState("");
+  const [newFolderName, setNewFolderName] = useState("");
   const [csv, setCsv] = useState("");
   const [selectedHubIds, setSelectedHubIds] = useState<string[]>([]);
   const [selectedBatchIds, setSelectedBatchIds] = useState<string[]>([]);
@@ -36,6 +38,7 @@ export function SalesAdminView() {
   const [status, setStatus] = useState<{ msg: string; err?: boolean }>({ msg: "" });
   const [submitting, setSubmitting] = useState(false);
   const [importingHub, setImportingHub] = useState(false);
+  const [creatingFolder, setCreatingFolder] = useState(false);
   const [removingBatchIds, setRemovingBatchIds] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -80,6 +83,13 @@ export function SalesAdminView() {
     }
   }, []);
 
+  const loadFolders = useCallback(async () => {
+    const r = await fetch("/api/sales/folders", { credentials: "same-origin" });
+    if (!r.ok) return;
+    const j = (await r.json()) as { folders: string[] };
+    setFolders(j.folders ?? []);
+  }, []);
+
   useEffect(() => {
     load();
   }, [load]);
@@ -87,6 +97,10 @@ export function SalesAdminView() {
   useEffect(() => {
     loadHubBatches();
   }, [loadHubBatches]);
+
+  useEffect(() => {
+    loadFolders();
+  }, [loadFolders]);
 
   const importedHubIds = useMemo(
     () => new Set(batches.map((b) => b.source_batch_id).filter(Boolean)),
@@ -139,7 +153,7 @@ export function SalesAdminView() {
       setFolder("");
       setCsv("");
       if (fileInputRef.current) fileInputRef.current.value = "";
-      await load();
+      await Promise.all([load(), loadFolders()]);
     } catch (error) {
       setStatus({
         msg: error instanceof Error ? error.message : "Upload failed.",
@@ -199,6 +213,40 @@ export function SalesAdminView() {
 
   async function onRemove(id: string) {
     await removeBatches([id]);
+  }
+
+  async function onCreateFolder(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newFolderName.trim()) {
+      setStatus({ msg: "Folder name required.", err: true });
+      return;
+    }
+
+    setCreatingFolder(true);
+    try {
+      const r = await fetch("/api/sales/folders", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ folder: newFolderName.trim() }),
+      });
+      const j = await readJsonResponse(r);
+      if (!r.ok) {
+        setStatus({ msg: String(j.error ?? "Failed to create folder."), err: true });
+        return;
+      }
+      setFolders(((j.folders as string[] | undefined) ?? []).slice());
+      setStatus({ msg: `Created folder "${newFolderName.trim()}".` });
+      setFolder(newFolderName.trim());
+      setNewFolderName("");
+    } catch (error) {
+      setStatus({
+        msg: error instanceof Error ? error.message : "Failed to create folder.",
+        err: true,
+      });
+    } finally {
+      setCreatingFolder(false);
+    }
   }
 
   function toggleHubBatch(id: string) {
@@ -292,7 +340,7 @@ export function SalesAdminView() {
       return;
     }
     setStatus({ msg: "Folder updated." });
-    await load();
+    await Promise.all([load(), loadFolders()]);
   }
 
   const sortedBatches = useMemo(
@@ -303,8 +351,14 @@ export function SalesAdminView() {
     [batches],
   );
 
+  const folderOptions = useMemo(() => {
+    const fromBatches = batches.map((batch) => batch.folder ?? "");
+    return [...new Set([...folders, ...fromBatches].map((value) => value.trim()).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }));
+  }, [batches, folders]);
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-4">
       {status.msg && (
         <div
           className={`rounded-md border px-4 py-3 text-sm ${
@@ -316,30 +370,77 @@ export function SalesAdminView() {
           {status.msg}
         </div>
       )}
-      <section>
-        <h2 className="text-base font-semibold tracking-tight">Import from Leads Hub</h2>
-        <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-          Pick one or more Leads Hub batches. The Sales batch names stay locked to the original Leads Hub names.
-        </p>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={selectAllHubBatches}
-            disabled={hubLoading || !availableHubBatches.length}
-            className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
-          >
-            Select all
-          </button>
-          <button
-            type="button"
-            onClick={clearHubSelection}
-            disabled={!selectedHubIds.length}
-            className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
-          >
-            Clear selection
-          </button>
+      <section className="rounded-lg border border-zinc-200 bg-zinc-50/70 p-3 dark:border-zinc-800 dark:bg-zinc-900/30">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-semibold tracking-tight">Sales folders</h2>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              Create folder sections first, then drop batches into them.
+            </p>
+          </div>
+          <div className="text-xs text-zinc-500 dark:text-zinc-400">
+            {folderOptions.length} folder{folderOptions.length === 1 ? "" : "s"}
+          </div>
         </div>
-        <form onSubmit={importFromLeadsHub} className="mt-4 space-y-3">
+        <form onSubmit={onCreateFolder} className="mt-3 flex flex-wrap items-center gap-2">
+          <input
+            type="text"
+            value={newFolderName}
+            onChange={(e) => setNewFolderName(e.target.value)}
+            placeholder="New folder name"
+            className="h-9 min-w-[220px] flex-1 rounded-md border border-zinc-300 bg-white px-3 text-sm focus:border-zinc-900 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:focus:border-zinc-100"
+          />
+          <button
+            type="submit"
+            disabled={creatingFolder}
+            className="inline-flex h-9 items-center rounded-md bg-zinc-900 px-4 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          >
+            {creatingFolder ? "Adding..." : "Add folder"}
+          </button>
+        </form>
+        {folderOptions.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {folderOptions.map((folderName) => (
+              <span
+                key={folderName}
+                className="rounded-full border border-zinc-300 bg-white px-2.5 py-1 text-xs text-zinc-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300"
+              >
+                {folderName}
+              </span>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
+        <section className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-semibold tracking-tight">Import from Leads Hub</h2>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                Pick batches to mirror into Sales.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={selectAllHubBatches}
+                disabled={hubLoading || !availableHubBatches.length}
+                className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+              >
+                Select all
+              </button>
+              <button
+                type="button"
+                onClick={clearHubSelection}
+                disabled={!selectedHubIds.length}
+                className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+          <form onSubmit={importFromLeadsHub} className="mt-3 space-y-3">
           {hubLoading ? (
             <div className="rounded-md border border-dashed border-zinc-300 bg-zinc-50 p-4 text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950">
               Loading Leads Hub batches...
@@ -349,7 +450,7 @@ export function SalesAdminView() {
               Everything from Leads Hub is already imported into Sales.
             </div>
           ) : (
-            <div className="grid gap-2">
+            <div className="grid max-h-72 gap-2 overflow-y-auto pr-1">
               {availableHubBatches.map((b) => {
                 const checked = selectedHubIds.includes(b.id);
                 return (
@@ -368,10 +469,10 @@ export function SalesAdminView() {
                       className="mt-1 h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-400/40"
                     />
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                      <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
                         {b.name}
                       </div>
-                      <div className="mt-0.5 truncate font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
+                      <div className="mt-0.5 font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
                         {b.leadCount} leads · {b.folder || "Unsorted"} · {b.fileName}
                       </div>
                     </div>
@@ -395,65 +496,78 @@ export function SalesAdminView() {
             </p>
           )}
         </form>
-      </section>
+        </section>
 
-      <section>
-        <h2 className="text-base font-semibold tracking-tight">Upload batch</h2>
-        <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-          Paste a CSV. First row = column names (e.g.{" "}
-          <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-900">First Name,Last Name,Phone,Email,Brokerage,City</code>).
-          All other rows = leads.
-        </p>
-        <form onSubmit={onSubmit} className="mt-4 space-y-3">
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Batch name (e.g. 2026-05-12_batch_01)"
-            required
-            className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm focus:border-zinc-900 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:focus:border-zinc-100"
-          />
-          <input
-            type="text"
-            value={folder}
-            onChange={(e) => setFolder(e.target.value)}
-            placeholder="Folder (optional)"
-            className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm focus:border-zinc-900 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:focus:border-zinc-100"
-          />
-          <textarea
-            value={csv}
-            onChange={(e) => setCsv(e.target.value)}
-            placeholder="Paste CSV here…"
-            rows={8}
-            required
-            className="w-full resize-y rounded-md border border-zinc-300 bg-white p-3 font-mono text-xs focus:border-zinc-900 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:focus:border-zinc-100"
-          />
-          <div className="flex items-center justify-between gap-3">
-            <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
-              <span className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800">
-                Choose .csv file
-              </span>
+        <section className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+          <h2 className="text-sm font-semibold tracking-tight">Upload batch</h2>
+          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+            Paste CSV or choose a file. First row should be your columns.
+          </p>
+          <form onSubmit={onSubmit} className="mt-3 space-y-3">
+            <div className="grid gap-2 sm:grid-cols-2">
               <input
-                ref={fileInputRef}
-                type="file"
-                accept=".csv,text/csv"
-                onChange={onFile}
-                className="hidden"
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Batch name"
+                required
+                className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm focus:border-zinc-900 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:focus:border-zinc-100"
               />
-            </label>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="inline-flex h-10 items-center rounded-md bg-zinc-900 px-5 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-            >
-              {submitting ? "Uploading…" : "Create batch"}
-            </button>
-          </div>
-        </form>
-      </section>
+              <select
+                value={folder}
+                onChange={(e) => setFolder(e.target.value)}
+                className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm focus:border-zinc-900 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:focus:border-zinc-100"
+              >
+                <option value="">No folder yet</option>
+                {folderOptions.map((folderName) => (
+                  <option key={folderName} value={folderName}>
+                    {folderName}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <textarea
+              value={csv}
+              onChange={(e) => setCsv(e.target.value)}
+              placeholder="Paste CSV here…"
+              rows={5}
+              required
+              className="w-full resize-y rounded-md border border-zinc-300 bg-white p-3 font-mono text-xs focus:border-zinc-900 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:focus:border-zinc-100"
+            />
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+                <span className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800">
+                  Choose .csv file
+                </span>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".csv,text/csv"
+                  onChange={onFile}
+                  className="hidden"
+                />
+              </label>
+              <button
+                type="submit"
+                disabled={submitting}
+                className="inline-flex h-10 items-center rounded-md bg-zinc-900 px-5 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+              >
+                {submitting ? "Uploading..." : "Create batch"}
+              </button>
+            </div>
+          </form>
+        </section>
+      </div>
 
-      <section>
-        <h2 className="text-base font-semibold tracking-tight">Batches</h2>
+      <section className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-semibold tracking-tight">Sales batches</h2>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              Move, organize, or remove batches without leaving this tab.
+            </p>
+          </div>
+        </div>
         {loading ? (
           <p className="mt-2 text-sm text-zinc-500">Loading…</p>
         ) : !batches.length ? (
@@ -493,57 +607,64 @@ export function SalesAdminView() {
                   : "Pick one or more batches to remove fast."}
               </span>
             </div>
-            {sortedBatches.map((b) => (
-              <div
-                key={b.id}
-                className="grid gap-3 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950 md:grid-cols-[auto_minmax(0,1fr)_260px_auto]"
-              >
-                <label className="flex items-start pt-1">
-                  <input
-                    type="checkbox"
-                    checked={selectedBatchIds.includes(b.id)}
-                    onChange={() => toggleBatchSelection(b.id)}
-                    disabled={removingBatchIds.includes(b.id)}
-                    className="h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-400/40"
-                    aria-label={`Select ${b.name}`}
-                  />
-                </label>
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                    {b.name}
+            <div className="max-h-[30rem] space-y-2 overflow-y-auto pr-1">
+              {sortedBatches.map((b) => (
+                <div
+                  key={b.id}
+                  className="grid gap-3 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950 md:grid-cols-[auto_minmax(0,1fr)_220px_auto]"
+                >
+                  <label className="flex items-start pt-1">
+                    <input
+                      type="checkbox"
+                      checked={selectedBatchIds.includes(b.id)}
+                      onChange={() => toggleBatchSelection(b.id)}
+                      disabled={removingBatchIds.includes(b.id)}
+                      className="h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-400/40"
+                      aria-label={`Select ${b.name}`}
+                    />
+                  </label>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                      {b.name}
+                    </div>
+                    <div className="mt-0.5 font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
+                      {b.folder || "Unsorted"} · {b.lead_count} leads · {new Date(b.created_at).toISOString().slice(0, 10)}
+                    </div>
                   </div>
-                  <div className="mt-0.5 truncate font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
-                    {b.folder || "Unsorted"} · {b.lead_count} leads · {new Date(b.created_at).toISOString().slice(0, 10)} · cols: {b.columns.join(", ")}
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={folderDrafts[b.id] ?? b.folder ?? ""}
+                      onChange={(e) =>
+                        setFolderDrafts((current) => ({ ...current, [b.id]: e.target.value }))
+                      }
+                      className="h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm focus:border-zinc-900 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:focus:border-zinc-100"
+                    >
+                      <option value="">Unsorted</option>
+                      {folderOptions.map((folderName) => (
+                        <option key={folderName} value={folderName}>
+                          {folderName}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => void saveFolder(b.id)}
+                      className="h-9 rounded-md border border-zinc-300 px-3 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+                    >
+                      Move
+                    </button>
                   </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={folderDrafts[b.id] ?? b.folder ?? ""}
-                    onChange={(e) =>
-                      setFolderDrafts((current) => ({ ...current, [b.id]: e.target.value }))
-                    }
-                    placeholder="User folder section"
-                    className="h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm focus:border-zinc-900 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:focus:border-zinc-100"
-                  />
                   <button
                     type="button"
-                    onClick={() => void saveFolder(b.id)}
-                    className="h-9 rounded-md border border-zinc-300 px-3 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+                    onClick={() => void onRemove(b.id)}
+                    disabled={removingBatchIds.includes(b.id)}
+                    className="rounded-md border border-rose-300 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50 dark:border-rose-800 dark:text-rose-300 dark:hover:bg-rose-950/30"
                   >
-                    Move
+                    {removingBatchIds.includes(b.id) ? "Removing..." : "Remove"}
                   </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void onRemove(b.id)}
-                  disabled={removingBatchIds.includes(b.id)}
-                  className="rounded-md border border-rose-300 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50 dark:border-rose-800 dark:text-rose-300 dark:hover:bg-rose-950/30"
-                >
-                  {removingBatchIds.includes(b.id) ? "Removing..." : "Remove"}
-                </button>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         )}
       </section>
