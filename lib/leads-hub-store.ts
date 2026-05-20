@@ -2,6 +2,7 @@ import { get } from "@vercel/edge-config";
 import { kvDelete, kvGet, kvPut } from "@/lib/store";
 
 const INDEX_KEY = "leads_hub_batches_index";
+const CHUNK_TARGET_BYTES = 180_000;
 
 export type LeadsHubBatch = {
   id: string;
@@ -26,14 +27,22 @@ export type LeadsHubLead = {
   batchName: string;
 };
 
+type LeadsHubBatchMeta = {
+  chunkCount: number;
+};
+
 export function randomId(len = 8): string {
   const a = new Uint8Array(len);
   crypto.getRandomValues(a);
   return Array.from(a, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function batchKey(id: string): string {
-  return `leads_hub_batch_${id}`;
+function batchMetaKey(id: string): string {
+  return `leads_hub_batch_meta_${id}`;
+}
+
+function batchChunkKey(id: string, index: number): string {
+  return `leads_hub_batch_${id}_${index}`;
 }
 
 function edgeConfigWritable(): boolean {
@@ -44,11 +53,11 @@ function edgeConfigWritable(): boolean {
   );
 }
 
-async function edgeGetArray<T>(key: string): Promise<T[] | null> {
+async function edgeGetValue<T>(key: string): Promise<T | null> {
   if (!process.env.EDGE_CONFIG) return null;
   try {
     const raw = await get<unknown>(key);
-    return Array.isArray(raw) ? (raw as T[]) : [];
+    return raw === undefined ? null : (raw as T);
   } catch {
     return null;
   }
@@ -104,9 +113,48 @@ async function deleteKey(key: string): Promise<void> {
   await kvDelete(key);
 }
 
+function chunkLeads(leads: LeadsHubLead[]): LeadsHubLead[][] {
+  if (leads.length === 0) return [[]];
+
+  const chunks: LeadsHubLead[][] = [];
+  let current: LeadsHubLead[] = [];
+
+  for (const lead of leads) {
+    const next = [...current, lead];
+    if (
+      current.length > 0 &&
+      JSON.stringify(next).length > CHUNK_TARGET_BYTES
+    ) {
+      chunks.push(current);
+      current = [lead];
+    } else {
+      current = next;
+    }
+  }
+
+  if (current.length > 0) chunks.push(current);
+  return chunks;
+}
+
+async function readBatchMeta(id: string): Promise<LeadsHubBatchMeta | null> {
+  const key = batchMetaKey(id);
+  const edge = await edgeGetValue<LeadsHubBatchMeta>(key);
+  if (edge && typeof edge.chunkCount === "number") return edge;
+
+  const local = await kvGet<LeadsHubBatchMeta>(key);
+  if (local && typeof local.chunkCount === "number") return local;
+  return null;
+}
+
+async function deleteBatchChunks(id: string, chunkCount: number): Promise<void> {
+  for (let i = 0; i < chunkCount; i++) {
+    await deleteKey(batchChunkKey(id, i));
+  }
+}
+
 export async function listLeadsHubBatches(): Promise<LeadsHubBatch[]> {
-  const edge = await edgeGetArray<LeadsHubBatch>(INDEX_KEY);
-  if (edge) return edge;
+  const edge = await edgeGetValue<LeadsHubBatch[]>(INDEX_KEY);
+  if (Array.isArray(edge)) return edge;
   return (await kvGet<LeadsHubBatch[]>(INDEX_KEY)) ?? [];
 }
 
@@ -115,14 +163,39 @@ export async function writeLeadsHubBatchesIndex(batches: LeadsHubBatch[]): Promi
 }
 
 export async function getLeadsHubBatch(id: string): Promise<LeadsHubLead[]> {
-  const key = batchKey(id);
-  const edge = await edgeGetArray<LeadsHubLead>(key);
-  if (edge) return edge;
-  return (await kvGet<LeadsHubLead[]>(key)) ?? [];
+  const meta = await readBatchMeta(id);
+  if (meta?.chunkCount) {
+    const all: LeadsHubLead[] = [];
+    for (let i = 0; i < meta.chunkCount; i++) {
+      const edge = await edgeGetValue<LeadsHubLead[]>(batchChunkKey(id, i));
+      const chunk = Array.isArray(edge)
+        ? edge
+        : ((await kvGet<LeadsHubLead[]>(batchChunkKey(id, i))) ?? []);
+      all.push(...chunk);
+    }
+    return all;
+  }
+
+  const legacyEdge = await edgeGetValue<LeadsHubLead[]>(batchChunkKey(id, 0));
+  if (Array.isArray(legacyEdge)) return legacyEdge;
+
+  return (await kvGet<LeadsHubLead[]>(batchChunkKey(id, 0))) ?? [];
 }
 
 export async function putLeadsHubBatch(id: string, leads: LeadsHubLead[]): Promise<void> {
-  await writeKey(batchKey(id), leads);
+  const previousMeta = await readBatchMeta(id);
+  const chunks = chunkLeads(leads);
+
+  for (let i = 0; i < chunks.length; i++) {
+    await writeKey(batchChunkKey(id, i), chunks[i]);
+  }
+
+  await writeKey(batchMetaKey(id), { chunkCount: chunks.length });
+
+  const previousChunkCount = previousMeta?.chunkCount ?? 0;
+  for (let i = chunks.length; i < previousChunkCount; i++) {
+    await deleteKey(batchChunkKey(id, i));
+  }
 }
 
 export async function addLeadsHubBatch(
@@ -136,7 +209,14 @@ export async function addLeadsHubBatch(
 }
 
 export async function deleteLeadsHubBatch(id: string): Promise<void> {
-  await deleteKey(batchKey(id));
+  const meta = await readBatchMeta(id);
+  if (meta?.chunkCount) {
+    await deleteBatchChunks(id, meta.chunkCount);
+    await deleteKey(batchMetaKey(id));
+  } else {
+    await deleteKey(batchChunkKey(id, 0));
+  }
+
   const index = await listLeadsHubBatches();
   await writeLeadsHubBatchesIndex(index.filter((b) => b.id !== id));
 }
