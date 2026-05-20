@@ -54,18 +54,31 @@ export default function LeadsBatchesPage() {
 
   const fileRef = useRef<HTMLInputElement>(null);
   const optimisticFoldersRef = useRef<Record<string, string>>({});
+  const optimisticDeletedBatchIdsRef = useRef<Set<string>>(new Set());
+  const optimisticCreatedBatchesRef = useRef<Record<string, LeadsHubBatch>>({});
 
   async function loadBatches() {
     try {
       const res = await fetch("/api/leads-hub/batches", { credentials: "same-origin" });
       if (res.ok) {
         const data = (await res.json()) as { batches?: LeadsHubBatch[]; folders?: string[] };
-        setBatches(
-          (data.batches || []).map((batch) => ({
-            ...batch,
-            folder: optimisticFoldersRef.current[batch.id] ?? batch.folder,
-          })),
-        );
+        const serverBatches = (data.batches || []).map((batch) => ({
+          ...batch,
+          folder: optimisticFoldersRef.current[batch.id] ?? batch.folder,
+        }));
+        const serverIds = new Set(serverBatches.map((batch) => batch.id));
+        for (const id of serverIds) {
+          if (optimisticDeletedBatchIdsRef.current.has(id)) {
+            optimisticDeletedBatchIdsRef.current.delete(id);
+          }
+          if (optimisticCreatedBatchesRef.current[id]) {
+            delete optimisticCreatedBatchesRef.current[id];
+          }
+        }
+        setBatches([
+          ...serverBatches.filter((batch) => !optimisticDeletedBatchIdsRef.current.has(batch.id)),
+          ...Object.values(optimisticCreatedBatchesRef.current).filter((batch) => !serverIds.has(batch.id)),
+        ]);
         setFolders(data.folders || []);
       }
     } catch (err) {
@@ -151,6 +164,9 @@ export default function LeadsBatchesPage() {
       });
       if (!res.ok) throw new Error("Could not delete batch");
 
+      optimisticDeletedBatchIdsRef.current.add(batch.id);
+      delete optimisticCreatedBatchesRef.current[batch.id];
+      setBatches((prev) => prev.filter((item) => item.id !== batch.id));
       toast.show(`Deleted lead list "${batch.name}"`, {
         undo: async () => {
           const restoreRes = await fetch("/api/leads-hub/batches", {
@@ -166,14 +182,17 @@ export default function LeadsBatchesPage() {
             }),
           });
           if (restoreRes.ok) {
+            optimisticDeletedBatchIdsRef.current.delete(batch.id);
+            optimisticCreatedBatchesRef.current[batch.id] = batch;
+            setBatches((prev) => {
+              if (prev.some((item) => item.id === batch.id)) return prev;
+              return [batch, ...prev];
+            });
             toast.show(`Restored lead list "${batch.name}"`);
-            await loadBatches();
             broadcastLeadsHubUpdate();
           }
         },
       });
-
-      await loadBatches();
       if (viewingBatch?.id === batch.id) setViewingBatch(null);
       broadcastLeadsHubUpdate();
     } catch (err) {
@@ -463,10 +482,19 @@ export default function LeadsBatchesPage() {
         const errData = await res.json();
         throw new Error(errData.error || "Failed to import leads");
       }
+      const data = (await res.json()) as { batch?: LeadsHubBatch };
+      const nextBatch = data.batch;
+      if (nextBatch) {
+        optimisticDeletedBatchIdsRef.current.delete(nextBatch.id);
+        optimisticCreatedBatchesRef.current[nextBatch.id] = nextBatch;
+        setBatches((prev) => {
+          const next = prev.filter((batch) => batch.id !== nextBatch.id);
+          return [nextBatch, ...next];
+        });
+      }
 
       toast.show(`Successfully imported ${leadsToImport.length} leads into "${item.name}"`);
       setPendingUploads((prev) => prev.filter((p) => p.id !== item.id));
-      await loadBatches();
       broadcastLeadsHubUpdate();
     } catch (err) {
       setParseError((err as Error).message);

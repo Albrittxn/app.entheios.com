@@ -38,6 +38,9 @@ export function SalesAdminView() {
   const [importingHub, setImportingHub] = useState(false);
   const [removingBatchIds, setRemovingBatchIds] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const optimisticFolderByIdRef = useRef<Record<string, string>>({});
+  const optimisticDeletedBatchIdsRef = useRef<Set<string>>(new Set());
+  const optimisticCreatedBatchesRef = useRef<Record<string, BatchMeta>>({});
 
   async function readJsonResponse(r: Response): Promise<Record<string, unknown>> {
     const text = await r.text();
@@ -53,7 +56,26 @@ export function SalesAdminView() {
     const r = await fetch("/api/sales/batches", { credentials: "same-origin" });
     if (!r.ok) return;
     const j = (await r.json()) as { batches: BatchMeta[] };
-    setBatches(j.batches);
+    const serverBatches = j.batches.map((batch) => ({
+      ...batch,
+      folder: optimisticFolderByIdRef.current[batch.id] ?? batch.folder,
+    }));
+    const serverIds = new Set(serverBatches.map((batch) => batch.id));
+    for (const batch of serverBatches) {
+      if (optimisticDeletedBatchIdsRef.current.has(batch.id)) {
+        optimisticDeletedBatchIdsRef.current.delete(batch.id);
+      }
+      if (optimisticCreatedBatchesRef.current[batch.id]) {
+        delete optimisticCreatedBatchesRef.current[batch.id];
+      }
+      if (optimisticFolderByIdRef.current[batch.id] === batch.folder) {
+        delete optimisticFolderByIdRef.current[batch.id];
+      }
+    }
+    setBatches([
+      ...serverBatches.filter((batch) => !optimisticDeletedBatchIdsRef.current.has(batch.id)),
+      ...Object.values(optimisticCreatedBatchesRef.current).filter((batch) => !serverIds.has(batch.id)),
+    ]);
     setSelectedBatchIds((current) =>
       current.filter((id) => j.batches.some((batch) => batch.id === id)),
     );
@@ -159,12 +181,20 @@ export function SalesAdminView() {
         return;
       }
       const batch = j.batch as { name?: string; lead_count?: number } | undefined;
+      const nextBatch = j.batch as BatchMeta | undefined;
+      if (nextBatch?.id) {
+        optimisticDeletedBatchIdsRef.current.delete(nextBatch.id);
+        optimisticCreatedBatchesRef.current[nextBatch.id] = nextBatch;
+        setBatches((current) => {
+          const next = current.filter((item) => item.id !== nextBatch.id);
+          return [nextBatch, ...next];
+        });
+      }
       setStatus({ msg: `Created ${batch?.name ?? name.trim()} (${batch?.lead_count ?? 0} leads).` });
       setName("");
       setFolder("");
       setCsv("");
       if (fileInputRef.current) fileInputRef.current.value = "";
-      await load();
     } catch (error) {
       setStatus({
         msg: error instanceof Error ? error.message : "Upload failed.",
@@ -196,11 +226,27 @@ export function SalesAdminView() {
         return;
       }
       const imported = Array.isArray(j.batches) ? j.batches.length : 0;
+      const importedBatches = Array.isArray(j.batches) ? (j.batches as BatchMeta[]) : [];
+      for (const batch of importedBatches) {
+        optimisticDeletedBatchIdsRef.current.delete(batch.id);
+        optimisticCreatedBatchesRef.current[batch.id] = batch;
+      }
+      if (importedBatches.length) {
+        setBatches((current) => {
+          const next = current.filter(
+            (item) => !importedBatches.some((importedBatch) => importedBatch.id === item.id),
+          );
+          return [...importedBatches, ...next];
+        });
+      }
       setStatus({
         msg: `Imported ${imported} batch${imported === 1 ? "" : "es"} from Leads Hub.`,
       });
       setSelectedHubIds([]);
-      await Promise.all([load(), loadHubBatches()]);
+      setHubBatches((current) =>
+        current.filter((batch) => !selectedHubIds.includes(batch.id)),
+      );
+      await loadHubBatches();
     } catch (error) {
       setStatus({
         msg: error instanceof Error ? error.message : "Import failed.",
@@ -286,6 +332,10 @@ export function SalesAdminView() {
     setRemovingBatchIds(uniqueIds);
     const previousBatches = batches;
     const previousSelection = selectedBatchIds;
+    for (const id of uniqueIds) {
+      optimisticDeletedBatchIdsRef.current.add(id);
+      delete optimisticCreatedBatchesRef.current[id];
+    }
     setBatches((current) => current.filter((batch) => !uniqueIds.includes(batch.id)));
     setSelectedBatchIds((current) => current.filter((id) => !uniqueIds.includes(id)));
 
@@ -309,8 +359,8 @@ export function SalesAdminView() {
             ? "Batch removed."
             : `Removed ${uniqueIds.length} batches.`,
       });
-      await load();
     } catch (error) {
+      for (const id of uniqueIds) optimisticDeletedBatchIdsRef.current.delete(id);
       setBatches(previousBatches);
       setSelectedBatchIds(previousSelection);
       setStatus({
@@ -324,6 +374,11 @@ export function SalesAdminView() {
 
   async function saveFolder(id: string) {
     const folderValue = (folderDrafts[id] ?? "").trim();
+    const previousFolder = batches.find((batch) => batch.id === id)?.folder ?? "";
+    optimisticFolderByIdRef.current[id] = folderValue;
+    setBatches((current) =>
+      current.map((batch) => (batch.id === id ? { ...batch, folder: folderValue } : batch)),
+    );
     const r = await fetch("/api/sales/batches", {
       method: "PATCH",
       credentials: "same-origin",
@@ -332,11 +387,15 @@ export function SalesAdminView() {
     });
     const j = await readJsonResponse(r);
     if (!r.ok) {
+      delete optimisticFolderByIdRef.current[id];
+      setBatches((current) =>
+        current.map((batch) => (batch.id === id ? { ...batch, folder: previousFolder } : batch)),
+      );
+      setFolderDrafts((current) => ({ ...current, [id]: previousFolder }));
       setStatus({ msg: String(j.error ?? "Failed to update folder."), err: true });
       return;
     }
     setStatus({ msg: "Folder updated." });
-    await load();
   }
 
   const sortedBatches = useMemo(

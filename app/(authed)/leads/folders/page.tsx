@@ -31,6 +31,7 @@ export default function LeadsFoldersPage() {
   const [status, setStatus] = useState<string>("");
   const optimisticCreatedFoldersRef = useRef<Set<string>>(new Set());
   const optimisticDeletedFoldersRef = useRef<Set<string>>(new Set());
+  const optimisticBatchFoldersRef = useRef<Record<string, string>>({});
 
   function mergeFolderState(serverFolders: string[], batchList: LeadsHubBatch[]): string[] {
     const next = new Set<string>();
@@ -52,8 +53,17 @@ export default function LeadsFoldersPage() {
       const res = await fetch("/api/leads-hub/batches", { credentials: "same-origin" });
       if (!res.ok) return;
       const data = (await res.json()) as { batches: LeadsHubBatch[]; folders?: string[] };
-      setBatches(data.batches || []);
-      setFoldersList(mergeFolderState(data.folders || [], data.batches || []));
+      const nextBatches = (data.batches || []).map((batch) => ({
+        ...batch,
+        folder: optimisticBatchFoldersRef.current[batch.id] ?? batch.folder,
+      }));
+      for (const batch of nextBatches) {
+        if (optimisticBatchFoldersRef.current[batch.id] === batch.folder) {
+          delete optimisticBatchFoldersRef.current[batch.id];
+        }
+      }
+      setBatches(nextBatches);
+      setFoldersList(mergeFolderState(data.folders || [], nextBatches));
     } finally {
       setLoading(false);
     }
@@ -137,12 +147,14 @@ export default function LeadsFoldersPage() {
   async function applyFolderToGroup(currentFolder: string, nextFolder: string) {
     const normalized = normalizeFolderName(nextFolder);
     const folderKey = currentFolder.trim();
+    const group = folders.find((f) => f.folder === folderKey);
+    const groupItems = group?.items ?? [];
     setBusyFolders((prev) => ({ ...prev, [folderKey]: true }));
     setStatus("");
     try {
-      const group = folders.find((f) => f.folder === folderKey);
       if (!group) return;
-      for (const batch of group.items) {
+      for (const batch of groupItems) {
+        optimisticBatchFoldersRef.current[batch.id] = normalized;
         // Sequential updates keep folder moves dependable for large groups.
         // eslint-disable-next-line no-await-in-loop
         await saveFolderForBatch(batch, normalized);
@@ -156,12 +168,13 @@ export default function LeadsFoldersPage() {
       });
       setBatchDrafts((prev) => {
         const next = { ...prev };
-        for (const batch of group.items) next[batch.id] = normalized;
+        for (const batch of groupItems) next[batch.id] = normalized;
         return next;
       });
       setStatus(normalized ? `Moved "${folderKey || "Unsorted"}" to "${normalized}"` : `Cleared "${folderKey || "Unsorted"}"`);
       broadcastLeadsHubUpdate();
     } catch (err) {
+      for (const batch of groupItems) delete optimisticBatchFoldersRef.current[batch.id];
       setStatus((err as Error).message);
     } finally {
       setBusyFolders((prev) => ({ ...prev, [folderKey]: false }));
@@ -177,6 +190,7 @@ export default function LeadsFoldersPage() {
     setMovingBatchIds((prev) => ({ ...prev, [batch.id]: true }));
     setStatus("");
     try {
+      optimisticBatchFoldersRef.current[batch.id] = nextFolder;
       await saveFolderForBatch(batch, nextFolder);
       setBatches((prev) =>
         prev.map((item) => (item.id === batch.id ? { ...item, folder: nextFolder } : item)),
@@ -192,6 +206,7 @@ export default function LeadsFoldersPage() {
       setStatus(nextFolder ? `Moved "${batch.name}" to "${nextFolder}"` : `Moved "${batch.name}" to Unsorted`);
       broadcastLeadsHubUpdate();
     } catch (err) {
+      delete optimisticBatchFoldersRef.current[batch.id];
       setStatus((err as Error).message);
     } finally {
       setMovingBatchIds((prev) => ({ ...prev, [batch.id]: false }));
@@ -214,6 +229,9 @@ export default function LeadsFoldersPage() {
       if (!res.ok) throw new Error(data.error ?? "Failed to delete folder");
       optimisticDeletedFoldersRef.current.add(folder);
       optimisticCreatedFoldersRef.current.delete(folder);
+      for (const batch of batches) {
+        if (batch.folder.trim() === folder) optimisticBatchFoldersRef.current[batch.id] = "";
+      }
       setFoldersList((prev) => prev.filter((item) => item !== folder));
       setBatches((prev) =>
         prev.map((batch) =>
@@ -224,6 +242,9 @@ export default function LeadsFoldersPage() {
       broadcastLeadsHubUpdate();
     } catch (err) {
       optimisticDeletedFoldersRef.current.delete(folder);
+      for (const batch of batches) {
+        if (batch.folder.trim() === folder) delete optimisticBatchFoldersRef.current[batch.id];
+      }
       setStatus((err as Error).message);
     } finally {
       setDeletingFolder(null);
