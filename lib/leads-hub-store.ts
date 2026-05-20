@@ -1,7 +1,7 @@
 import { get } from "@vercel/edge-config";
 import { kvDelete, kvGet, kvPut } from "@/lib/store";
 
-const INDEX_KEY = "leads_hub:batches:index";
+const INDEX_KEY = "leads_hub_batches_index";
 
 export type LeadsHubBatch = {
   id: string;
@@ -33,7 +33,7 @@ export function randomId(len = 8): string {
 }
 
 function batchKey(id: string): string {
-  return `leads_hub:batch:${id}`;
+  return `leads_hub_batch_${id}`;
 }
 
 function edgeConfigWritable(): boolean {
