@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 
 type UserBatchStatus = { downloaded_at?: number; completed_at?: number };
 type BatchRow = {
@@ -37,17 +37,35 @@ export function SalesLeadsView({ isAdmin: _isAdmin }: SalesLeadsViewProps) {
   const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const optimisticStatusByIdRef = useRef<Record<string, UserBatchStatus>>({});
 
   const load = useCallback(async () => {
     try {
-      const r = await fetch("/api/sales/batches", { credentials: "same-origin" });
+      const r = await fetch("/api/sales/batches", {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
       if (!r.ok) {
         const j = (await r.json().catch(() => ({}))) as { error?: string };
         setError(j.error ?? `HTTP ${r.status}`);
         return;
       }
       const j = (await r.json()) as { batches: BatchRow[] };
-      setBatches(j.batches);
+      const nextBatches = j.batches.map((batch) => ({
+        ...batch,
+        status: optimisticStatusByIdRef.current[batch.id] ?? batch.status,
+      }));
+      for (const batch of nextBatches) {
+        const optimistic = optimisticStatusByIdRef.current[batch.id];
+        if (
+          optimistic &&
+          optimistic.downloaded_at === batch.status?.downloaded_at &&
+          optimistic.completed_at === batch.status?.completed_at
+        ) {
+          delete optimisticStatusByIdRef.current[batch.id];
+        }
+      }
+      setBatches(nextBatches);
       setLoading(false);
     } catch {
       setError("Failed to load");
@@ -60,6 +78,11 @@ export function SalesLeadsView({ isAdmin: _isAdmin }: SalesLeadsViewProps) {
 
   async function moveToNew(id: string) {
     const previous = batches;
+    optimisticStatusByIdRef.current[id] = {
+      ...(batches.find((batch) => batch.id === id)?.status ?? {}),
+      downloaded_at: undefined,
+      completed_at: undefined,
+    };
     setBatches((current) =>
       current.map((batch) =>
         batch.id === id
@@ -80,10 +103,15 @@ export function SalesLeadsView({ isAdmin: _isAdmin }: SalesLeadsViewProps) {
       credentials: "same-origin",
     });
     if (r.ok) return;
+    delete optimisticStatusByIdRef.current[id];
     setBatches(previous);
   }
 
   function onDownload(b: BatchRow) {
+    optimisticStatusByIdRef.current[b.id] = {
+      ...b.status,
+      downloaded_at: b.status?.downloaded_at ?? Date.now(),
+    };
     // Optimistically move the batch into Downloaded immediately for this user.
     setBatches((prev) =>
       prev.map((x) =>
