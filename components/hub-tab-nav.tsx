@@ -26,8 +26,11 @@ export function HubTabNav({
 }) {
   const pathname = usePathname();
   const visible = tabs.filter((t) => !t.adminOnly || showAdmin);
-  const isSelected = (href: string) =>
-    pathname === href || pathname.startsWith(href + "/");
+  const selectedHref =
+    visible
+      .filter((t) => pathname === t.href || pathname.startsWith(t.href + "/"))
+      .sort((a, b) => b.href.length - a.href.length)[0]?.href ?? null;
+  const isSelected = (href: string) => selectedHref === href;
 
   // The Admin tab is kept OUT of the horizontally-scrollable strip — an
   // overflow container clips on both axes, which would cut off the Admin
