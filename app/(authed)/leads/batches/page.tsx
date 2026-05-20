@@ -682,7 +682,7 @@ export default function LeadsBatchesPage() {
             ) : batches.length === 0 ? (
               <div className="py-6 text-center text-xs text-zinc-500">No uploaded batch lists yet.</div>
             ) : (
-              <div className="space-y-6">
+              <div className="space-y-5">
                 {groupedBatches.map((group) => (
                   <div key={group.folder || "unsorted"} className="space-y-3">
                     <div className="flex items-center justify-between gap-3">
@@ -693,7 +693,7 @@ export default function LeadsBatchesPage() {
                         {group.items.length} {group.items.length === 1 ? "list" : "lists"}
                       </span>
                     </div>
-                    <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
                       <AnimatePresence initial={false}>
                         {group.items.map((b) => {
                           const isViewing = viewingBatch?.id === b.id;
@@ -705,14 +705,14 @@ export default function LeadsBatchesPage() {
                               animate={{ opacity: 1 }}
                               exit={{ opacity: 0 }}
                               className={cn(
-                                "flex flex-col justify-between rounded-lg border bg-white p-4 transition-all dark:bg-zinc-950",
+                                "grid gap-3 border-b bg-white px-4 py-3 transition-all md:grid-cols-[minmax(0,1.2fr)_120px_minmax(220px,320px)_auto] md:items-center dark:bg-zinc-950",
                                 isViewing
                                   ? "border-zinc-900 ring-1 ring-zinc-900 dark:border-zinc-100 dark:ring-zinc-100"
-                                  : "border-zinc-200 hover:border-zinc-300 dark:border-zinc-800 dark:hover:border-zinc-700",
+                                  : "border-zinc-200 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900/50",
                               )}
                             >
-                              <div>
-                                <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2">
                                   <span className="block truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                                     {b.name}
                                   </span>
@@ -720,44 +720,43 @@ export default function LeadsBatchesPage() {
                                     {b.leadCount.toLocaleString()} leads
                                   </span>
                                 </div>
-                                <span className="mt-1 block truncate font-mono text-[10px] text-zinc-500 dark:text-zinc-400">
-                                  File: {b.fileName}
-                                </span>
-                                <span className="mt-1 block truncate font-mono text-[10px] text-zinc-500 dark:text-zinc-400">
-                                  Folder: {b.folder || "Unsorted"}
-                                </span>
-                                <div className="mt-2 flex items-center gap-2">
-                                  <Input
-                                    type="text"
-                                    value={folderDrafts[b.id] ?? b.folder}
-                                    onChange={(e) =>
-                                      setFolderDrafts((prev) => ({ ...prev, [b.id]: e.target.value }))
-                                    }
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Enter") {
-                                        e.preventDefault();
-                                        void saveBatchFolder(b);
-                                      }
-                                    }}
-                                    list="leads-hub-folder-suggestions"
-                                    placeholder="Move to folder"
-                                    className="h-7 text-[11px] bg-white dark:bg-zinc-900"
-                                  />
-                                  <Button
-                                    type="button"
-                                    onClick={() => void saveBatchFolder(b)}
-                                    disabled={savingFolderIds.includes(b.id)}
-                                    className="h-7 shrink-0 bg-zinc-900 text-[11px] text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-900"
-                                  >
-                                    {savingFolderIds.includes(b.id) ? "Saving…" : "Save"}
-                                  </Button>
+                                <div className="mt-1 truncate font-mono text-[10px] text-zinc-500 dark:text-zinc-400">
+                                  {b.fileName}
                                 </div>
-                                <span className="mt-1 block font-mono text-[10px] text-zinc-500">
+                                <div className="mt-1 font-mono text-[10px] text-zinc-500">
                                   Uploaded {formatUploadedDate(b.uploadedAt)}
-                                </span>
+                                </div>
                               </div>
-
-                              <div className="mt-4 flex items-center justify-between border-t border-zinc-100 pt-3 dark:border-zinc-900">
+                              <div className="font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
+                                {b.folder || "Unsorted"}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Input
+                                  type="text"
+                                  value={folderDrafts[b.id] ?? b.folder}
+                                  onChange={(e) =>
+                                    setFolderDrafts((prev) => ({ ...prev, [b.id]: e.target.value }))
+                                  }
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                      e.preventDefault();
+                                      void saveBatchFolder(b);
+                                    }
+                                  }}
+                                  list="leads-hub-folder-suggestions"
+                                  placeholder="Move to folder"
+                                  className="h-8 text-[11px] bg-white dark:bg-zinc-900"
+                                />
+                                <Button
+                                  type="button"
+                                  onClick={() => void saveBatchFolder(b)}
+                                  disabled={savingFolderIds.includes(b.id)}
+                                  className="h-8 shrink-0 bg-zinc-900 text-[11px] text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-900"
+                                >
+                                  {savingFolderIds.includes(b.id) ? "Saving…" : "Save"}
+                                </Button>
+                              </div>
+                              <div className="flex items-center justify-between gap-3 md:justify-end">
                                 <button
                                   type="button"
                                   onClick={() => handleViewLeads(b)}
