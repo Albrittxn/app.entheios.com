@@ -128,33 +128,16 @@ export function SalesLeadsView({
   }
 
   async function markAsDownloaded(id: string) {
-    const previous = batches;
     setDownloadingIds((prev) => new Set([...prev, id]));
     try {
-      const r = await fetch(`/api/sales/batches/${encodeURIComponent(id)}/csv`, {
-        method: "GET",
-        credentials: "same-origin",
-        cache: "no-store",
-      });
-      if (!r.ok) {
-        setBatches(previous);
-        return;
-      }
-      const csv = await r.text();
       const batch = batches.find((item) => item.id === id);
-      const fileName = `${(batch?.name ?? "batch").replace(/[^a-z0-9._-]+/gi, "_")}.csv`;
-      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = fileName;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
+      const downloadUrl = `/api/sales/batches/${encodeURIComponent(id)}/csv`;
 
       if (canPersistDownloadStatus) {
-        const nextStatus = { ...(batch?.status ?? {}), downloaded_at: Date.now() };
+        const nextStatus = {
+          ...(optimisticStatusByIdRef.current[id] ?? batch?.status ?? {}),
+          downloaded_at: Date.now(),
+        };
         optimisticStatusByIdRef.current[id] = nextStatus;
         setBatches((prev) =>
           prev.map((x) =>
@@ -167,6 +150,12 @@ export function SalesLeadsView({
           ),
         );
       }
+
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
     } finally {
       setDownloadingIds((prev) => {
         const next = new Set(prev);
