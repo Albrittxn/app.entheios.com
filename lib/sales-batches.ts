@@ -76,9 +76,27 @@ function normalizeFolderList(names: string[]): string[] {
 
 async function readBlobJson<T>(pathname: string): Promise<T | null> {
   const result = await get(pathname, { access: "private" });
-  if (!result || result.statusCode !== 200 || !result.stream) return null;
-  const text = await new Response(result.stream).text();
-  return JSON.parse(text) as T;
+  if (result && result.statusCode === 200 && result.stream) {
+    const text = await new Response(result.stream).text();
+    return JSON.parse(text) as T;
+  }
+
+  // Blob pathnames that already contain percent-encoded segments can fail to
+  // resolve through `get(pathname)` because the client re-encodes `%`.
+  // Fall back to resolving the exact blob first, then read via its blob URL.
+  if (pathname.includes("%")) {
+    const page = await list({ prefix: pathname, mode: "expanded", limit: 10 });
+    const exact = page.blobs.find((blob) => blob.pathname === pathname);
+    if (exact) {
+      const byUrl = await get(exact.url, { access: "private" });
+      if (byUrl && byUrl.statusCode === 200 && byUrl.stream) {
+        const text = await new Response(byUrl.stream).text();
+        return JSON.parse(text) as T;
+      }
+    }
+  }
+
+  return null;
 }
 
 async function writeBlobJson(pathname: string, value: unknown): Promise<void> {
