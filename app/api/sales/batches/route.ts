@@ -1,6 +1,6 @@
 // GET /api/sales/batches              → list batches w/ user's status
 // POST /api/sales/batches  (admin)    → create batch from CSV
-// DELETE /api/sales/batches?id=X (admin) → remove batch
+// DELETE /api/sales/batches?id=X or ids[]=X,Y (admin) → remove batch(es)
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { getEffectiveUser } from "@/lib/effective-user";
@@ -114,11 +114,17 @@ export async function DELETE(req: Request) {
   if (!isAdminEmail(session.email))
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const url = new URL(req.url);
-  const id = url.searchParams.get("id");
-  if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
+  const singleId = url.searchParams.get("id")?.trim() ?? "";
+  const queryIds = url.searchParams
+    .getAll("ids")
+    .flatMap((value) => value.split(","))
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const ids = [...new Set([singleId, ...queryIds].filter(Boolean))];
+  if (!ids.length) return NextResponse.json({ error: "id required" }, { status: 400 });
   try {
-    await deleteBatch(id);
-    return NextResponse.json({ ok: true });
+    await Promise.all(ids.map((id) => deleteBatch(id)));
+    return NextResponse.json({ ok: true, removed: ids.length });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to delete batch.";
     return NextResponse.json({ error: message }, { status: 500 });
