@@ -77,12 +77,12 @@ export default function SalesSystems() {
               <li>
                 Booking link —{" "}
                 <a
-                  href="https://calendar.entheios.com/quick"
+                  href="https://cal.com/team/entheios/discovery-call-out"
                   target="_blank"
                   rel="noopener"
                   className="underline underline-offset-2"
                 >
-                  calendar.entheios.com/quick
+                  Meeting Link
                 </a>
                 .
               </li>
