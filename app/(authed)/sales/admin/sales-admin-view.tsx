@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type BatchMeta = {
   id: string;
@@ -26,8 +26,7 @@ export function SalesAdminView() {
   const [hubLoading, setHubLoading] = useState(true);
   const [name, setName] = useState("");
   const [csv, setCsv] = useState("");
-  const [hubSourceId, setHubSourceId] = useState("");
-  const [hubName, setHubName] = useState("");
+  const [selectedHubIds, setSelectedHubIds] = useState<string[]>([]);
   const [status, setStatus] = useState<{ msg: string; err?: boolean }>({ msg: "" });
   const [submitting, setSubmitting] = useState(false);
   const [importingHub, setImportingHub] = useState(false);
@@ -48,8 +47,7 @@ export function SalesAdminView() {
       const j = (await r.json()) as { batches: LeadsHubBatch[] };
       const next = j.batches || [];
       setHubBatches(next);
-      setHubSourceId((current) => current || next[0]?.id || "");
-      setHubName((current) => current || next[0]?.name || "");
+      setSelectedHubIds((current) => current.filter((id) => next.some((b) => b.id === id)));
     } finally {
       setHubLoading(false);
     }
@@ -62,6 +60,11 @@ export function SalesAdminView() {
   useEffect(() => {
     loadHubBatches();
   }, [loadHubBatches]);
+
+  const selectedHubBatches = useMemo(
+    () => hubBatches.filter((b) => selectedHubIds.includes(b.id)),
+    [hubBatches, selectedHubIds],
+  );
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -96,8 +99,8 @@ export function SalesAdminView() {
   async function importFromLeadsHub(e: React.FormEvent) {
     e.preventDefault();
     setStatus({ msg: "" });
-    if (!hubSourceId) {
-      setStatus({ msg: "Choose a Leads Hub batch.", err: true });
+    if (!selectedHubIds.length) {
+      setStatus({ msg: "Choose one or more Leads Hub batches.", err: true });
       return;
     }
     setImportingHub(true);
@@ -106,7 +109,7 @@ export function SalesAdminView() {
         method: "POST",
         credentials: "same-origin",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sourceBatchId: hubSourceId, name: hubName.trim() }),
+        body: JSON.stringify({ sourceBatchIds: selectedHubIds }),
       });
       const j = await r.json();
       if (!r.ok) {
@@ -114,8 +117,9 @@ export function SalesAdminView() {
         return;
       }
       setStatus({
-        msg: `Imported ${j.batch.name} from Leads Hub (${j.batch.lead_count} leads).`,
+        msg: `Imported ${j.batches.length} batch${j.batches.length === 1 ? "" : "es"} from Leads Hub.`,
       });
+      setSelectedHubIds([]);
       await load();
     } finally {
       setImportingHub(false);
@@ -149,44 +153,100 @@ export function SalesAdminView() {
     await load();
   }
 
+  function toggleHubBatch(id: string) {
+    setSelectedHubIds((current) =>
+      current.includes(id) ? current.filter((x) => x !== id) : [...current, id],
+    );
+  }
+
+  function selectAllHubBatches() {
+    setSelectedHubIds(hubBatches.map((b) => b.id));
+  }
+
+  function clearHubSelection() {
+    setSelectedHubIds([]);
+  }
+
   return (
     <div className="space-y-8">
       <section>
         <h2 className="text-base font-semibold tracking-tight">Import from Leads Hub</h2>
         <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-          Pick an existing Leads Hub batch and turn it into a Sales batch without leaving the Leads tab.
+          Pick one or more Leads Hub batches. The Sales batch names stay locked to the original Leads Hub names.
         </p>
-        <form onSubmit={importFromLeadsHub} className="mt-4 space-y-3">
-          <select
-            value={hubSourceId}
-            onChange={(e) => {
-              setHubSourceId(e.target.value);
-              const selected = hubBatches.find((b) => b.id === e.target.value);
-              if (selected) setHubName(selected.name);
-            }}
-            className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm focus:border-zinc-900 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:focus:border-zinc-100"
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={selectAllHubBatches}
+            disabled={hubLoading || !hubBatches.length}
+            className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
           >
-            <option value="">{hubLoading ? "Loading Leads Hub batches..." : "Select a Leads Hub batch"}</option>
-            {hubBatches.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name} ({b.leadCount} leads)
-              </option>
-            ))}
-          </select>
-          <input
-            type="text"
-            value={hubName}
-            onChange={(e) => setHubName(e.target.value)}
-            placeholder="Sales batch name"
-            className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm focus:border-zinc-900 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:focus:border-zinc-100"
-          />
+            Select all
+          </button>
+          <button
+            type="button"
+            onClick={clearHubSelection}
+            disabled={!selectedHubIds.length}
+            className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+          >
+            Clear selection
+          </button>
+        </div>
+        <form onSubmit={importFromLeadsHub} className="mt-4 space-y-3">
+          {hubLoading ? (
+            <div className="rounded-md border border-dashed border-zinc-300 bg-zinc-50 p-4 text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950">
+              Loading Leads Hub batches...
+            </div>
+          ) : hubBatches.length === 0 ? (
+            <div className="rounded-md border border-dashed border-zinc-300 bg-zinc-50 p-4 text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950">
+              No Leads Hub batches yet.
+            </div>
+          ) : (
+            <div className="grid gap-2">
+              {hubBatches.map((b) => {
+                const checked = selectedHubIds.includes(b.id);
+                return (
+                  <label
+                    key={b.id}
+                    className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${
+                      checked
+                        ? "border-zinc-900 bg-zinc-50 dark:border-zinc-100 dark:bg-zinc-900/40"
+                        : "border-zinc-200 bg-white hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-zinc-700"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleHubBatch(b.id)}
+                      className="mt-1 h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-400/40"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                        {b.name}
+                      </div>
+                      <div className="mt-0.5 truncate font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
+                        {b.leadCount} leads · {b.fileName}
+                      </div>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+          )}
           <button
             type="submit"
-            disabled={importingHub || !hubSourceId}
+            disabled={importingHub || !selectedHubIds.length}
             className="inline-flex h-10 items-center rounded-md bg-zinc-900 px-5 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
           >
-            {importingHub ? "Importing…" : "Import selected batch"}
+            {importingHub
+              ? "Importing…"
+              : `Import ${selectedHubIds.length || ""} selected batch${selectedHubIds.length === 1 ? "" : "es"}`.trim()}
           </button>
+          {selectedHubBatches.length > 0 && (
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              Names stay locked to: {selectedHubBatches.map((b) => b.name).join(", ")}
+            </p>
+          )}
         </form>
       </section>
 

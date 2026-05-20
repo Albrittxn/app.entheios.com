@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useToast } from "@/components/toast-provider";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ import {
 import type { LeadsHubBatch, LeadsHubLead } from "@/lib/leads-hub-store";
 
 type PendingUpload = {
+  id: string;
   fileName: string;
   name: string;
   rowCount: number;
@@ -28,18 +29,16 @@ type PendingUpload = {
 
 export default function LeadsBatchesPage() {
   const toast = useToast();
-  
-  // Data State
+
   const [batches, setBatches] = useState<LeadsHubBatch[]>([]);
   const [loading, setLoading] = useState(true);
-  
-  // Upload State
-  const [pending, setPending] = useState<PendingUpload | null>(null);
+
+  const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
   const [parsing, setParsing] = useState(false);
   const [parseError, setParseError] = useState<string | null>(null);
+  const [importingIds, setImportingIds] = useState<string[]>([]);
   const [dragOver, setDragOver] = useState(false);
-  
-  // Active Batch Details Drawer State
+
   const [viewingBatch, setViewingBatch] = useState<LeadsHubBatch | null>(null);
   const [viewingLeads, setViewingLeads] = useState<LeadsHubLead[]>([]);
   const [drawerLoading, setDrawerLoading] = useState(false);
@@ -47,7 +46,6 @@ export default function LeadsBatchesPage() {
 
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Fetch batches
   async function loadBatches() {
     try {
       const res = await fetch("/api/leads-hub/batches", { credentials: "same-origin" });
@@ -76,9 +74,7 @@ export default function LeadsBatchesPage() {
           setViewingLeads(data.leads || []);
           setBatches((prev) =>
             prev.map((b) =>
-              b.id === viewingBatch.id
-                ? { ...b, leadCount: (data.leads || []).length }
-                : b,
+              b.id === viewingBatch.id ? { ...b, leadCount: (data.leads || []).length } : b,
             ),
           );
         }
@@ -86,7 +82,6 @@ export default function LeadsBatchesPage() {
     }
   });
 
-  // Open Drawer to inspect leads inside a batch
   async function handleViewLeads(batch: LeadsHubBatch) {
     setViewingBatch(batch);
     setDrawerLoading(true);
@@ -105,10 +100,8 @@ export default function LeadsBatchesPage() {
     }
   }
 
-  // Delete batch with Undo capability
   async function handleDeleteBatch(batch: LeadsHubBatch) {
     try {
-      // First fetch all leads in this batch to preserve them for possible Undo
       const leadsRes = await fetch(`/api/leads-hub/leads?batchId=${batch.id}`);
       let batchLeadsSnap: LeadsHubLead[] = [];
       if (leadsRes.ok) {
@@ -119,12 +112,10 @@ export default function LeadsBatchesPage() {
       const res = await fetch(`/api/leads-hub/batches?id=${batch.id}`, {
         method: "DELETE",
       });
-
       if (!res.ok) throw new Error("Could not delete batch");
 
       toast.show(`Deleted lead list "${batch.name}"`, {
         undo: async () => {
-          // Restore batch by POSTing back all original leads & metadata
           const restoreRes = await fetch("/api/leads-hub/batches", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -145,9 +136,7 @@ export default function LeadsBatchesPage() {
       });
 
       await loadBatches();
-      if (viewingBatch?.id === batch.id) {
-        setViewingBatch(null);
-      }
+      if (viewingBatch?.id === batch.id) setViewingBatch(null);
       broadcastLeadsHubUpdate();
     } catch (err) {
       console.error(err);
@@ -155,26 +144,16 @@ export default function LeadsBatchesPage() {
     }
   }
 
-  // Delete lead inside active drawer
   async function handleDeleteLeadInDrawer(lead: LeadsHubLead) {
     try {
       const res = await fetch(`/api/leads-hub/leads/${lead.id}?batchId=${lead.batchId}`, {
         method: "DELETE",
       });
-
       if (!res.ok) throw new Error("Could not delete lead");
 
-      // Optimistically update local drawer state
       setViewingLeads((prev) => prev.filter((l) => l.id !== lead.id));
-      
-      // Update batch index lead count
       setBatches((prev) =>
-        prev.map((b) => {
-          if (b.id === lead.batchId) {
-            return { ...b, leadCount: b.leadCount - 1 };
-          }
-          return b;
-        })
+        prev.map((b) => (b.id === lead.batchId ? { ...b, leadCount: b.leadCount - 1 } : b)),
       );
       broadcastLeadsHubUpdate();
 
@@ -186,15 +165,9 @@ export default function LeadsBatchesPage() {
             body: JSON.stringify(lead),
           });
           if (restoreRes.ok) {
-            // Restore drawer leads & list count
             setViewingLeads((prev) => [...prev, lead]);
             setBatches((prev) =>
-              prev.map((b) => {
-                if (b.id === lead.batchId) {
-                  return { ...b, leadCount: b.leadCount + 1 };
-                }
-                return b;
-              })
+              prev.map((b) => (b.id === lead.batchId ? { ...b, leadCount: b.leadCount + 1 } : b)),
             );
             toast.show(`Restored ${lead.firstName} ${lead.lastName}`);
             broadcastLeadsHubUpdate();
@@ -207,24 +180,54 @@ export default function LeadsBatchesPage() {
     }
   }
 
-  // File Upload logic
-  async function handleFile(file: File) {
+  function defaultBatchName(file: File): string {
+    return file.name.replace(/\.[^/.]+$/, "");
+  }
+
+  function makeUploadId(seed: string): string {
+    return `${seed}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }
+
+  async function parseFile(file: File): Promise<PendingUpload> {
+    const { headers, rows, rowCount } = await parseSheet(file);
+    const { map, missing } = matchColumns(headers);
+    return {
+      id: makeUploadId(file.name),
+      fileName: file.name,
+      name: defaultBatchName(file),
+      rowCount,
+      headers,
+      rows,
+      map,
+      missing,
+    };
+  }
+
+  async function handleFiles(files: File[]) {
     setParseError(null);
+    if (!files.length) return;
     setParsing(true);
     try {
-      const { headers, rows, rowCount } = await parseSheet(file);
-      const { map, missing } = matchColumns(headers);
-      const defaultTitle = file.name.replace(/\.[^/.]+$/, "");
-      
-      setPending({
-        fileName: file.name,
-        name: defaultTitle,
-        rowCount,
-        headers,
-        rows,
-        map,
-        missing,
-      });
+      const parsed = await Promise.all(
+        files.map(async (file) => {
+          try {
+            return { ok: true as const, value: await parseFile(file) };
+          } catch (err) {
+            return {
+              ok: false as const,
+              error: `${file.name}: ${(err as Error).message ?? "Couldn't read file. CSV/XLSX only."}`,
+            };
+          }
+        }),
+      );
+      const successful = parsed.filter((result): result is { ok: true; value: PendingUpload } => result.ok).map((result) => result.value);
+      const failures = parsed.filter((result): result is { ok: false; error: string } => !result.ok).map((result) => result.error);
+      if (successful.length) {
+        setPendingUploads((prev) => [...prev, ...successful]);
+      }
+      if (failures.length) {
+        setParseError(failures.join("\n"));
+      }
     } catch (err) {
       setParseError((err as Error).message ?? "Couldn't read file. CSV/XLSX only.");
     } finally {
@@ -240,16 +243,19 @@ export default function LeadsBatchesPage() {
     try {
       const { headers, rows, rowCount } = parseDelimitedText(trimmed);
       const { map, missing } = matchColumns(headers);
-      
-      setPending({
-        fileName: sourceName,
-        name: "Pasted Batch",
-        rowCount,
-        headers,
-        rows,
-        map,
-        missing,
-      });
+      setPendingUploads((prev) => [
+        ...prev,
+        {
+          id: makeUploadId(sourceName),
+          fileName: sourceName,
+          name: sourceName,
+          rowCount,
+          headers,
+          rows,
+          map,
+          missing,
+        },
+      ]);
     } catch (err) {
       setParseError((err as Error).message ?? "Couldn't read pasted data.");
     } finally {
@@ -258,15 +264,16 @@ export default function LeadsBatchesPage() {
   }
 
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
-    if (f) handleFile(f);
+    const files = Array.from(e.target.files ?? []);
+    if (files.length) void handleFiles(files);
+    e.target.value = "";
   }
 
   function onDrop(e: React.DragEvent<HTMLDivElement>) {
     e.preventDefault();
     setDragOver(false);
-    const f = e.dataTransfer.files?.[0];
-    if (f) handleFile(f);
+    const files = Array.from(e.dataTransfer.files ?? []);
+    if (files.length) void handleFiles(files);
   }
 
   function onPasteZone(e: React.ClipboardEvent<HTMLDivElement>) {
@@ -277,13 +284,17 @@ export default function LeadsBatchesPage() {
     }
   }
 
-  // Submit Import
-  async function submitImport() {
-    if (!pending || pending.missing.length > 0) return;
-    setParsing(true);
-    
-    const m = pending.map;
-    const leadsToImport = pending.rows.map((row) => {
+  function updatePending(id: string, patch: Partial<PendingUpload>) {
+    setPendingUploads((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
+  }
+
+  async function submitImport(item: PendingUpload) {
+    if (item.missing.length > 0) return;
+    if (importingIds.includes(item.id)) return;
+    setImportingIds((prev) => [...prev, item.id]);
+
+    const m = item.map;
+    const leadsToImport = item.rows.map((row) => {
       const cell = (idx: number | null) => (idx !== null && idx >= 0 ? (row[idx] ?? "").trim() : "");
       return {
         firstName: cell(m.firstName),
@@ -300,8 +311,8 @@ export default function LeadsBatchesPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: pending.name,
-          fileName: pending.fileName,
+          name: item.name,
+          fileName: item.fileName,
           leads: leadsToImport,
         }),
       });
@@ -311,19 +322,27 @@ export default function LeadsBatchesPage() {
         throw new Error(errData.error || "Failed to import leads");
       }
 
-      toast.show(`Successfully created batch list "${pending.name}"`);
-      setPending(null);
-      if (fileRef.current) fileRef.current.value = "";
+      toast.show(`Successfully imported ${leadsToImport.length} leads into "${item.name}"`);
+      setPendingUploads((prev) => prev.filter((p) => p.id !== item.id));
       await loadBatches();
       broadcastLeadsHubUpdate();
     } catch (err) {
       setParseError((err as Error).message);
     } finally {
-      setParsing(false);
+      setImportingIds((prev) => prev.filter((id) => id !== item.id));
     }
   }
 
-  // Local search inside active inspected batch
+  async function importAll() {
+    const queue = [...pendingUploads];
+    for (const item of queue) {
+      if (item.missing.length > 0) continue;
+      // Sequential imports keep feedback easy to follow.
+      // eslint-disable-next-line no-await-in-loop
+      await submitImport(item);
+    }
+  }
+
   const filteredDrawerLeads = useMemo(() => {
     const q = drawerSearch.trim().toLowerCase();
     if (!q) return viewingLeads;
@@ -331,11 +350,10 @@ export default function LeadsBatchesPage() {
       [l.firstName, l.lastName, l.email, l.phone, l.brokerage, l.state]
         .join(" ")
         .toLowerCase()
-        .includes(q)
+        .includes(q),
     );
   }, [viewingLeads, drawerSearch]);
 
-  // Date formatting helper
   function formatUploadedDate(iso: string): string {
     const d = new Date(iso);
     return d.toLocaleDateString("en-US", {
@@ -362,17 +380,14 @@ export default function LeadsBatchesPage() {
       </header>
 
       <div className="grid gap-8 lg:grid-cols-3">
-        {/* Left 2 Cols: Batches List & Upload */}
-        <div className="lg:col-span-2 space-y-8">
-          
-          {/* Upload card */}
-          <div className="rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950 shadow-sm">
+        <div className="space-y-8 lg:col-span-2">
+          <div className="rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
             <div className="border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
               <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                 Upload new batch list
               </h2>
               <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-                Drop CSV or XLSX to create a distinct batch of leads.
+                Drop one or more CSV/XLSX files to create distinct batches. Each batch defaults to the file name.
               </p>
             </div>
 
@@ -406,117 +421,159 @@ export default function LeadsBatchesPage() {
                 <input
                   ref={fileRef}
                   type="file"
+                  multiple
                   accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                   onChange={onFileChange}
                   className="sr-only"
                 />
-                {!pending && !parsing && (
+                {!pendingUploads.length && !parsing && (
                   <>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-5 w-5 text-zinc-400 dark:text-zinc-500">
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="h-5 w-5 text-zinc-400 dark:text-zinc-500"
+                    >
                       <path d="M12 5v14m-7-7h14" />
                     </svg>
                     <div className="mt-1.5 text-xs font-semibold text-zinc-900 dark:text-zinc-100">
-                      Add and verify a new list file
+                      Add and verify new list files
                     </div>
                   </>
                 )}
                 {parsing && (
-                  <div className="text-xs text-zinc-500 flex items-center gap-1.5">
-                    <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
+                  <div className="flex items-center gap-1.5 text-xs text-zinc-500">
+                    <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                     </svg>
                     Parsing sheet...
                   </div>
                 )}
-                {pending && !parsing && (
+                {!!pendingUploads.length && !parsing && (
                   <div className="w-full text-left" onClick={(e) => e.stopPropagation()}>
-                    <div className="flex items-center justify-between mb-3 border-b border-zinc-100 dark:border-zinc-800 pb-2">
+                    <div className="mb-3 flex items-center justify-between border-b border-zinc-100 pb-2 dark:border-zinc-800">
                       <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
                         Import Verification
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => setPending(null)}
-                        className="text-xs font-semibold text-rose-500"
-                      >
-                        Cancel
-                      </button>
+                      <div className="flex items-center gap-3">
+                        {pendingUploads.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => void importAll()}
+                            className="text-xs font-semibold text-zinc-900 hover:underline dark:text-zinc-100"
+                          >
+                            Import All
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPendingUploads([]);
+                            if (fileRef.current) fileRef.current.value = "";
+                          }}
+                          className="text-xs font-semibold text-rose-500"
+                        >
+                          Clear Queue
+                        </button>
+                      </div>
                     </div>
 
                     <div className="space-y-3">
-                      <div>
-                        <label htmlFor="batch-name-input" className="block text-[11px] font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                          Verify Batch / List Name
-                        </label>
-                        <Input
-                          id="batch-name-input"
-                          type="text"
-                          value={pending.name}
-                          onChange={(e) => setPending({ ...pending, name: e.target.value })}
-                          className="h-8 text-xs bg-white dark:bg-zinc-900"
-                          placeholder="Batch Title"
-                        />
-                      </div>
-
-                      <div className="text-[11px] text-zinc-500">
-                        Parsed <strong>{pending.rowCount.toLocaleString()}</strong> rows from <code className="bg-zinc-100 dark:bg-zinc-800 px-1 py-0.5 rounded">{pending.fileName}</code>
-                      </div>
-
-                      {/* Header validation checklist */}
-                      <div>
-                        <span className="block text-[10px] font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
-                          Mapped Columns:
-                        </span>
-                        <div className="grid grid-cols-3 gap-1 font-mono text-[9px]">
-                          {REQUIRED_COLUMNS.map((c) => {
-                            const ok = pending.map[c.key] !== null;
-                            return (
-                              <div
-                                key={c.key}
-                                className={cn(
-                                  "flex items-center gap-1 border rounded px-1.5 py-0.5",
-                                  ok ? "border-emerald-300 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/20" : "border-rose-300 bg-rose-50 text-rose-800 dark:bg-rose-950/20"
-                                )}
+                      {pendingUploads.map((pending) => (
+                        <div key={pending.id} className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+                          <div className="mb-3 flex items-start justify-between gap-3 border-b border-zinc-100 pb-2 dark:border-zinc-800">
+                            <div className="min-w-0">
+                              <label
+                                htmlFor={`batch-name-input-${pending.id}`}
+                                className="block mb-1 text-[11px] font-medium text-zinc-700 dark:text-zinc-300"
                               >
-                                <span>{ok ? "✓" : "✗"}</span>
-                                <span className="truncate">{c.label}</span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
+                                Verify Batch / List Name
+                              </label>
+                              <Input
+                                id={`batch-name-input-${pending.id}`}
+                                type="text"
+                                value={pending.name}
+                                onChange={(e) => updatePending(pending.id, { name: e.target.value })}
+                                className="h-8 text-xs bg-white dark:bg-zinc-900"
+                                placeholder="Batch Title"
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setPendingUploads((prev) => prev.filter((p) => p.id !== pending.id))}
+                              className="text-xs font-semibold text-rose-500"
+                            >
+                              Remove
+                            </button>
+                          </div>
 
-                      <div className="flex items-center justify-end gap-2 pt-2">
-                        <Button
-                          type="button"
-                          onClick={submitImport}
-                          disabled={pending.missing.length > 0 || !pending.name.trim()}
-                          className="h-7 text-[11px] bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-900"
-                        >
-                          Confirm & Add List
-                        </Button>
-                      </div>
+                          <div className="text-[11px] text-zinc-500">
+                            Parsed <strong>{pending.rowCount.toLocaleString()}</strong> rows from{" "}
+                            <code className="rounded bg-zinc-100 px-1 py-0.5 dark:bg-zinc-800">{pending.fileName}</code>
+                          </div>
+
+                          <div className="mt-3">
+                            <span className="mb-1 block text-[10px] font-semibold text-zinc-700 dark:text-zinc-300">
+                              Mapped Columns:
+                            </span>
+                            <div className="grid grid-cols-3 gap-1 font-mono text-[9px]">
+                              {REQUIRED_COLUMNS.map((c) => {
+                                const ok = pending.map[c.key] !== null;
+                                return (
+                                  <div
+                                    key={c.key}
+                                    className={cn(
+                                      "flex items-center gap-1 rounded border px-1.5 py-0.5",
+                                      ok
+                                        ? "border-emerald-300 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/20"
+                                        : "border-rose-300 bg-rose-50 text-rose-800 dark:bg-rose-950/20",
+                                    )}
+                                  >
+                                    <span>{ok ? "✓" : "✗"}</span>
+                                    <span className="truncate">{c.label}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          <div className="mt-3 flex items-center justify-end gap-2 pt-2">
+                            <Button
+                              type="button"
+                              onClick={() => void submitImport(pending)}
+                              disabled={pending.missing.length > 0 || !pending.name.trim() || importingIds.includes(pending.id)}
+                              className="h-7 bg-zinc-900 text-[11px] text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-900"
+                            >
+                              {importingIds.includes(pending.id) ? "Importing…" : "Confirm & Add List"}
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}
               </div>
-              {parseError && <p className="mt-2 text-xs font-semibold text-rose-600">{parseError}</p>}
+              {parseError && (
+                <p className="mt-2 whitespace-pre-line text-xs font-semibold text-rose-600 dark:text-rose-400">
+                  {parseError}
+                </p>
+              )}
             </div>
           </div>
 
-          {/* Batches index view */}
-          <div className="rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950 shadow-sm p-6">
-            <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-4">
+          <div className="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+            <h2 className="mb-4 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
               All Uploaded Batches
             </h2>
 
             {loading ? (
-              <div className="text-xs text-zinc-500 text-center py-6">Loading list index...</div>
+              <div className="py-6 text-center text-xs text-zinc-500">Loading list index...</div>
             ) : batches.length === 0 ? (
-              <div className="text-xs text-zinc-500 text-center py-6">
-                No uploaded batch lists yet.
-              </div>
+              <div className="py-6 text-center text-xs text-zinc-500">No uploaded batch lists yet.</div>
             ) : (
               <div className="grid gap-4 sm:grid-cols-2">
                 <AnimatePresence initial={false}>
@@ -530,42 +587,41 @@ export default function LeadsBatchesPage() {
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
                         className={cn(
-                          "flex flex-col justify-between rounded-lg border p-4 transition-all bg-white dark:bg-zinc-950",
+                          "flex flex-col justify-between rounded-lg border bg-white p-4 transition-all dark:bg-zinc-950",
                           isViewing
                             ? "border-zinc-900 ring-1 ring-zinc-900 dark:border-zinc-100 dark:ring-zinc-100"
-                            : "border-zinc-200 hover:border-zinc-300 dark:border-zinc-800 dark:hover:border-zinc-700"
+                            : "border-zinc-200 hover:border-zinc-300 dark:border-zinc-800 dark:hover:border-zinc-700",
                         )}
                       >
                         <div>
                           <div className="flex items-start justify-between gap-2">
-                            <span className="font-semibold text-sm text-zinc-900 dark:text-zinc-100 truncate block">
+                            <span className="block truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                               {b.name}
                             </span>
-                            <span className="bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded text-[10px] font-mono text-zinc-700 dark:text-zinc-200 shrink-0">
+                            <span className="shrink-0 rounded bg-zinc-100 px-2 py-0.5 font-mono text-[10px] text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
                               {b.leadCount.toLocaleString()} leads
                             </span>
                           </div>
-                          <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-mono block truncate mt-1">
+                          <span className="mt-1 block truncate font-mono text-[10px] text-zinc-500 dark:text-zinc-400">
                             File: {b.fileName}
                           </span>
-                          <span className="text-[10px] text-zinc-500 font-mono block mt-1">
+                          <span className="mt-1 block font-mono text-[10px] text-zinc-500">
                             Uploaded {formatUploadedDate(b.uploadedAt)}
                           </span>
                         </div>
 
-                        <div className="flex items-center justify-between border-t border-zinc-100 dark:border-zinc-900 pt-3 mt-4">
+                        <div className="mt-4 flex items-center justify-between border-t border-zinc-100 pt-3 dark:border-zinc-900">
                           <button
                             type="button"
                             onClick={() => handleViewLeads(b)}
-                            className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 hover:underline"
+                            className="text-xs font-semibold text-zinc-900 hover:underline dark:text-zinc-100"
                           >
                             {isViewing ? "Inspecting" : "View Leads"}
                           </button>
-                          
                           <button
                             type="button"
                             onClick={() => handleDeleteBatch(b)}
-                            className="text-xs font-semibold text-zinc-400 hover:text-rose-600 transition-colors"
+                            className="text-xs font-semibold text-zinc-400 transition-colors hover:text-rose-600"
                           >
                             Delete List
                           </button>
@@ -579,7 +635,6 @@ export default function LeadsBatchesPage() {
           </div>
         </div>
 
-        {/* Right 1 Col: Inspected Leads Drawer Panel */}
         <div className="lg:col-span-1">
           <AnimatePresence mode="wait">
             {viewingBatch ? (
@@ -588,21 +643,21 @@ export default function LeadsBatchesPage() {
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 20 }}
-                className="rounded-lg border border-zinc-900 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-950 shadow-md sticky top-20"
+                className="sticky top-20 rounded-lg border border-zinc-900 bg-white p-5 shadow-md dark:border-zinc-700 dark:bg-zinc-950"
               >
-                <div className="flex items-start justify-between border-b border-zinc-100 dark:border-zinc-800 pb-3 mb-4 gap-2">
+                <div className="mb-4 flex items-start justify-between gap-2 border-b border-zinc-100 pb-3 dark:border-zinc-800">
                   <div className="min-w-0">
-                    <span className="text-xs text-zinc-500 dark:text-zinc-400 font-bold uppercase tracking-wider block">
+                    <span className="block text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
                       List Inspector
                     </span>
-                    <h3 className="font-bold text-sm text-zinc-900 dark:text-zinc-100 truncate block mt-0.5">
+                    <h3 className="mt-0.5 block truncate text-sm font-bold text-zinc-900 dark:text-zinc-100">
                       {viewingBatch.name}
                     </h3>
                   </div>
                   <button
                     type="button"
                     onClick={() => setViewingBatch(null)}
-                    className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 font-bold text-sm"
+                    className="text-sm font-bold text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
                   >
                     Close
                   </button>
@@ -613,40 +668,35 @@ export default function LeadsBatchesPage() {
                   placeholder="Search leads in this batch..."
                   value={drawerSearch}
                   onChange={(e) => setDrawerSearch(e.target.value)}
-                  className="h-8 text-xs bg-zinc-50 dark:bg-zinc-900 border-zinc-200 mb-4 focus-visible:ring-zinc-900"
+                  className="mb-4 h-8 border-zinc-200 bg-zinc-50 text-xs focus-visible:ring-zinc-900 dark:bg-zinc-900"
                 />
 
                 {drawerLoading ? (
-                  <div className="text-xs text-zinc-500 text-center py-10">
-                    Loading list leads...
-                  </div>
+                  <div className="py-10 text-center text-xs text-zinc-500">Loading list leads...</div>
                 ) : filteredDrawerLeads.length === 0 ? (
-                  <div className="text-xs text-zinc-500 text-center py-10">
-                    No matching leads in this list.
-                  </div>
+                  <div className="py-10 text-center text-xs text-zinc-500">No matching leads in this list.</div>
                 ) : (
-                  <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
+                  <div className="max-h-[380px] space-y-2 overflow-y-auto pr-1">
                     {filteredDrawerLeads.map((l) => (
                       <div
                         key={l.id}
-                        className="group border border-zinc-100 dark:border-zinc-900 p-2.5 rounded-md hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors flex justify-between items-center"
+                        className="group flex items-center justify-between rounded-md border border-zinc-100 p-2.5 transition-colors hover:bg-zinc-50 dark:border-zinc-900 dark:hover:bg-zinc-900/50"
                       >
                         <div className="min-w-0">
-                          <span className="font-semibold text-xs text-zinc-900 dark:text-zinc-100 block">
+                          <span className="block text-xs font-semibold text-zinc-900 dark:text-zinc-100">
                             {l.firstName} {l.lastName}
                           </span>
-                          <span className="text-[10px] text-zinc-500 font-mono block">
+                          <span className="block font-mono text-[10px] text-zinc-500">
                             {l.phone} · {l.state || "US"}
                           </span>
-                          <span className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate block">
+                          <span className="block truncate text-[10px] text-zinc-500 dark:text-zinc-400">
                             {l.email}
                           </span>
                         </div>
-                        
                         <button
                           type="button"
                           onClick={() => handleDeleteLeadInDrawer(l)}
-                          className="text-[10px] font-semibold text-zinc-400 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100"
+                          className="text-[10px] font-semibold text-zinc-400 opacity-0 transition-colors hover:text-rose-500 group-hover:opacity-100"
                         >
                           Delete
                         </button>
