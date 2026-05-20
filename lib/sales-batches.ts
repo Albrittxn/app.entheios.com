@@ -4,7 +4,8 @@
 //   batch:<id>               → Batch (meta + rows)
 //   batchstatus:<email>:<id> → UserBatchStatus
 
-import { del, get, list, put } from "@vercel/blob";
+import { get as edgeGet } from "@vercel/edge-config";
+import { del, get as blobGet, list as blobList, put as blobPut } from "@vercel/blob";
 import { kvGet, kvPut, kvDelete } from "@/lib/store";
 
 export type BatchMeta = {
@@ -24,6 +25,8 @@ export type UserBatchStatus = {
   downloaded_at?: number;
   completed_at?: number;
 };
+
+type UserBatchStatusMap = Record<string, UserBatchStatus>;
 
 function blobConfigured(): boolean {
   return Boolean(process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID);
@@ -57,6 +60,10 @@ function batchFoldersPath(): string {
   return "sales/folders/list.json";
 }
 
+function batchStatusStoreKey(email: string): string {
+  return `sales_batch_statuses:${batchStatusUserKey(email)}`;
+}
+
 function blobConfigError(): Error {
   return new Error(
     "Sales batch storage requires Vercel Blob in production. Add a Blob store to this Vercel project so BLOB_READ_WRITE_TOKEN is available.",
@@ -87,7 +94,7 @@ function normalizeFolderList(names: string[]): string[] {
 }
 
 async function readBlobJson<T>(pathname: string): Promise<T | null> {
-  const result = await get(pathname, { access: "private" });
+  const result = await blobGet(pathname, { access: "private" });
   if (result && result.statusCode === 200 && result.stream) {
     const text = await new Response(result.stream).text();
     return JSON.parse(text) as T;
@@ -97,10 +104,10 @@ async function readBlobJson<T>(pathname: string): Promise<T | null> {
   // resolve through `get(pathname)` because the client re-encodes `%`.
   // Fall back to resolving the exact blob first, then read via its blob URL.
   if (pathname.includes("%")) {
-    const page = await list({ prefix: pathname, mode: "expanded", limit: 10 });
+    const page = await blobList({ prefix: pathname, mode: "expanded", limit: 10 });
     const exact = page.blobs.find((blob) => blob.pathname === pathname);
     if (exact) {
-      const byUrl = await get(exact.url, { access: "private" });
+      const byUrl = await blobGet(exact.url, { access: "private" });
       if (byUrl && byUrl.statusCode === 200 && byUrl.stream) {
         const text = await new Response(byUrl.stream).text();
         return JSON.parse(text) as T;
@@ -112,7 +119,7 @@ async function readBlobJson<T>(pathname: string): Promise<T | null> {
 }
 
 async function writeBlobJson(pathname: string, value: unknown): Promise<void> {
-  await put(pathname, JSON.stringify(value), {
+  await blobPut(pathname, JSON.stringify(value), {
     access: "private",
     addRandomSuffix: false,
     allowOverwrite: true,
@@ -139,7 +146,7 @@ export async function listBatchIndex(): Promise<BatchMeta[]> {
     const blobs: { pathname: string }[] = [];
     let cursor: string | undefined;
     do {
-      const page = await list({
+      const page = await blobList({
         prefix: "sales/batches/",
         mode: "expanded",
         limit: 1000,
@@ -272,22 +279,103 @@ export async function addBatchFolder(folderName: string): Promise<string[]> {
   return next;
 }
 
+function edgeStatusWritable(): boolean {
+  return Boolean(
+    process.env.EDGE_CONFIG_ID &&
+      process.env.VERCEL_TEAM_ID &&
+      process.env.VERCEL_API_TOKEN,
+  );
+}
+
+async function readEdgeUserBatchStatusMap(email: string): Promise<UserBatchStatusMap | null> {
+  if (!process.env.EDGE_CONFIG) return null;
+  try {
+    const raw = await edgeGet<unknown>(batchStatusStoreKey(email));
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+    const out: UserBatchStatusMap = {};
+    for (const [batchId, value] of Object.entries(raw)) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+      const downloaded_at =
+        typeof (value as { downloaded_at?: unknown }).downloaded_at === "number"
+          ? (value as { downloaded_at: number }).downloaded_at
+          : undefined;
+      const completed_at =
+        typeof (value as { completed_at?: unknown }).completed_at === "number"
+          ? (value as { completed_at: number }).completed_at
+          : undefined;
+      out[batchId] = {
+        ...(downloaded_at ? { downloaded_at } : {}),
+        ...(completed_at ? { completed_at } : {}),
+      };
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+async function writeEdgeUserBatchStatusMap(
+  email: string,
+  statuses: UserBatchStatusMap,
+): Promise<void> {
+  const id = process.env.EDGE_CONFIG_ID;
+  const teamId = process.env.VERCEL_TEAM_ID;
+  const token = process.env.VERCEL_API_TOKEN;
+  if (!id || !teamId || !token) {
+    throw new Error(
+      "Edge Config write env vars missing (EDGE_CONFIG_ID, VERCEL_TEAM_ID, VERCEL_API_TOKEN).",
+    );
+  }
+  const url = `https://api.vercel.com/v1/edge-config/${id}/items?teamId=${teamId}`;
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      items: [{ operation: "upsert", key: batchStatusStoreKey(email), value: statuses }],
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Edge Config write failed (${res.status}): ${body}`);
+  }
+}
+
 export async function getUserBatchStatus(
   email: string,
   batchId: string,
 ): Promise<UserBatchStatus> {
-  if (blobConfigured()) {
-    const currentPath = batchStatusPath(email, batchId);
-    const current = await readBlobJson<UserBatchStatus>(currentPath);
-    if (current) return current;
+  const normalizedEmail = normalizeStatusEmail(email);
+  const edgeStatuses = await readEdgeUserBatchStatusMap(normalizedEmail);
+  if (edgeStatuses && edgeStatuses[batchId]) {
+    return edgeStatuses[batchId];
+  }
 
-    const legacyPath = legacyBatchStatusPath(email, batchId);
+  if (blobConfigured()) {
+    const currentPath = batchStatusPath(normalizedEmail, batchId);
+    const current = await readBlobJson<UserBatchStatus>(currentPath);
+    if (current) {
+      if (edgeStatusWritable()) {
+        const next = { ...(edgeStatuses ?? {}), [batchId]: current };
+        await writeEdgeUserBatchStatusMap(normalizedEmail, next);
+      }
+      return current;
+    }
+
+    const legacyPath = legacyBatchStatusPath(normalizedEmail, batchId);
     if (legacyPath !== currentPath) {
-      return (await readBlobJson<UserBatchStatus>(legacyPath)) ?? {};
+      const legacy = (await readBlobJson<UserBatchStatus>(legacyPath)) ?? {};
+      if ((legacy.downloaded_at || legacy.completed_at) && edgeStatusWritable()) {
+        const next = { ...(edgeStatuses ?? {}), [batchId]: legacy };
+        await writeEdgeUserBatchStatusMap(normalizedEmail, next);
+      }
+      return legacy;
     }
     return {};
   }
-  return (await kvGet<UserBatchStatus>(`batchstatus:${normalizeStatusEmail(email)}:${batchId}`)) ?? {};
+  return (await kvGet<UserBatchStatus>(`batchstatus:${normalizedEmail}:${batchId}`)) ?? {};
 }
 
 export async function putUserBatchStatus(
@@ -295,18 +383,31 @@ export async function putUserBatchStatus(
   batchId: string,
   s: UserBatchStatus,
 ): Promise<void> {
+  const normalizedEmail = normalizeStatusEmail(email);
+  if (edgeStatusWritable()) {
+    const statuses = (await readEdgeUserBatchStatusMap(normalizedEmail)) ?? {};
+    const next = { ...statuses };
+    if (s.downloaded_at || s.completed_at) next[batchId] = s;
+    else delete next[batchId];
+    await writeEdgeUserBatchStatusMap(normalizedEmail, next);
+  }
+
   if (!blobConfigured() && process.env.VERCEL) throw blobConfigError();
   if (blobConfigured()) {
-    const currentPath = batchStatusPath(email, batchId);
-    await writeBlobJson(currentPath, s);
-
-    const legacyPath = legacyBatchStatusPath(email, batchId);
-    if (legacyPath !== currentPath) {
-      await deleteBlob(legacyPath);
+    if (s.downloaded_at || s.completed_at) {
+      await writeBlobJson(batchStatusPath(normalizedEmail, batchId), s);
+    } else {
+      await deleteBlob(batchStatusPath(normalizedEmail, batchId));
     }
+
+    await deleteBlob(legacyBatchStatusPath(normalizedEmail, batchId));
     return;
   }
-  await kvPut(`batchstatus:${normalizeStatusEmail(email)}:${batchId}`, s);
+  if (s.downloaded_at || s.completed_at) {
+    await kvPut(`batchstatus:${normalizedEmail}:${batchId}`, s);
+  } else {
+    await kvDelete(`batchstatus:${normalizedEmail}:${batchId}`);
+  }
 }
 
 // ── CSV ─────────────────────────────────────────────────────────────────
