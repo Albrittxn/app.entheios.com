@@ -98,11 +98,11 @@ export function SalesAdminView() {
 
   async function importFromLeadsHub(e: React.FormEvent) {
     e.preventDefault();
-    setStatus({ msg: "" });
     if (!selectedHubIds.length) {
       setStatus({ msg: "Choose one or more Leads Hub batches.", err: true });
       return;
     }
+    setStatus({ msg: `Importing ${selectedHubIds.length} batch${selectedHubIds.length === 1 ? "" : "es"}...` });
     setImportingHub(true);
     try {
       const r = await fetch("/api/sales/batches/from-leads-hub", {

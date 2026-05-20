@@ -36,6 +36,10 @@ async function writeBatchIndex(items: BatchMeta[]): Promise<void> {
   await kvPut("batches:index", items);
 }
 
+export async function replaceBatchIndex(items: BatchMeta[]): Promise<void> {
+  await writeBatchIndex(items);
+}
+
 export async function getBatch(id: string): Promise<Batch | null> {
   return kvGet<Batch>(`batch:${id}`);
 }
@@ -55,6 +59,18 @@ export async function addBatch(meta: BatchMeta, rows: string[][]): Promise<void>
   const idx = await listBatchIndex();
   idx.unshift(meta);
   await writeBatchIndex(idx);
+}
+
+export async function addBatches(items: Array<{ meta: BatchMeta; rows: string[][] }>): Promise<void> {
+  if (!items.length) return;
+  for (const { meta, rows } of items) {
+    // Keep bulk imports steady and avoid overwhelming the storage backend.
+    // eslint-disable-next-line no-await-in-loop
+    await putBatch({ ...meta, rows });
+  }
+  const idx = await listBatchIndex();
+  const next = [...items.map((item) => item.meta), ...idx];
+  await writeBatchIndex(next);
 }
 
 export async function getUserBatchStatus(

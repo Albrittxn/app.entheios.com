@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { isAdminEmail } from "@/lib/permissions";
-import { addBatch, randomId, type BatchMeta } from "@/lib/sales-batches";
+import { addBatches, randomId, type BatchMeta } from "@/lib/sales-batches";
 import {
   getLeadsHubBatch,
   listLeadsHubBatches,
@@ -58,7 +58,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: firstFailure.error }, { status: 400 });
   }
 
-  const created: BatchMeta[] = [];
+  const toCreate: Array<{ meta: BatchMeta; rows: string[][] }> = [];
 
   for (const result of resolvedSources) {
     if (!result.ok) continue;
@@ -81,9 +81,9 @@ export async function POST(req: Request) {
       created_by: session.email.toLowerCase(),
     };
 
-    await addBatch(meta, rows);
-    created.push(meta);
+    toCreate.push({ meta, rows });
   }
 
-  return NextResponse.json({ ok: true, batches: created });
+  await addBatches(toCreate);
+  return NextResponse.json({ ok: true, batches: toCreate.map((item) => item.meta) });
 }
