@@ -13,7 +13,7 @@
 
 import { NextResponse } from "next/server";
 import crypto from "node:crypto";
-import type { Lead, LeadSource, LeadStatus } from "@/lib/closing-leads";
+import { getLeadMeetingLink, type Lead, type LeadSource, type LeadStatus } from "@/lib/closing-leads";
 import { patchLead, upsertLead } from "@/lib/closing-leads-store";
 
 export const runtime = "nodejs";
@@ -68,7 +68,7 @@ function mapBookingToLead(payload: Record<string, unknown>, source: LeadSource):
     pickString(payload.startTime) ??
     pickString(payload.start) ??
     new Date().toISOString();
-  const meetingLink =
+  const meetingLinkValue =
     pickString(payload.meetingUrl) ??
     pickString(payload.location) ??
     undefined;
@@ -96,7 +96,7 @@ function mapBookingToLead(payload: Record<string, unknown>, source: LeadSource):
     closerEmail,
     closerName,
     meetingTimeIso: startTime,
-    meetingLink,
+    meetingLink: getLeadMeetingLink({ id: uid, meetingLink: meetingLinkValue }),
     status: "Booked",
     objections: [],
     notes: "",

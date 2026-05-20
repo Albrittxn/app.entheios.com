@@ -83,6 +83,36 @@ export type Lead = {
   updatedAt?: string; // ISO
 };
 
+function normalizeHttpUrl(value: string): string | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+
+  if (trimmed.startsWith("/")) {
+    return `https://app.cal.com${trimmed}`;
+  }
+
+  if (/^app\.cal\.com\//i.test(trimmed)) {
+    return `https://${trimmed}`;
+  }
+
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol === "http:" || url.protocol === "https:") {
+      return url.toString();
+    }
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
+}
+
+export function getLeadMeetingLink(lead: Pick<Lead, "id" | "meetingLink">): string | undefined {
+  const normalized = lead.meetingLink ? normalizeHttpUrl(lead.meetingLink) : undefined;
+  if (normalized) return normalized;
+  return lead.id ? `https://app.cal.com/video/${encodeURIComponent(lead.id)}` : undefined;
+}
+
 export function splitUpcomingPast(leads: Lead[]) {
   const now = new Date();
   const upcoming: Lead[] = [];

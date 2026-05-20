@@ -8,6 +8,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
+  getLeadMeetingLink,
   type Lead,
   type LeadStatus,
   formatMeetingTime,
@@ -198,6 +199,7 @@ function CallsTable({
     <ul className="divide-y divide-zinc-200 overflow-hidden rounded-xl border border-zinc-200 bg-white dark:divide-zinc-800 dark:border-zinc-800 dark:bg-zinc-950">
       {leads.map((lead) => {
         const isOpen = openId === lead.id;
+        const meetingHref = getLeadMeetingLink(lead);
         return (
           <li
             key={lead.id}
@@ -229,9 +231,9 @@ function CallsTable({
               </div>
               <div className="flex flex-shrink-0 items-center gap-2">
                 <StatusChip value={lead.status} />
-                {lead.meetingLink && (
+                {meetingHref && (
                   <a
-                    href={lead.meetingLink}
+                    href={meetingHref}
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={(e) => e.stopPropagation()}
