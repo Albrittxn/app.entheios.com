@@ -21,7 +21,9 @@ export default function LeadsFoldersPage() {
   const [batches, setBatches] = useState<LeadsHubBatch[]>([]);
   const [loading, setLoading] = useState(true);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [batchDrafts, setBatchDrafts] = useState<Record<string, string>>({});
   const [busyFolders, setBusyFolders] = useState<Record<string, boolean>>({});
+  const [movingBatchIds, setMovingBatchIds] = useState<Record<string, boolean>>({});
   const [status, setStatus] = useState<string>("");
 
   async function loadBatches() {
@@ -52,7 +54,22 @@ export default function LeadsFoldersPage() {
       }
       return next;
     });
+    setBatchDrafts((prev) => {
+      const next = { ...prev };
+      for (const batch of batches) {
+        if (next[batch.id] === undefined) next[batch.id] = batch.folder || "";
+      }
+      return next;
+    });
   }, [batches]);
+
+  const folderSuggestions = useMemo(
+    () =>
+      [...new Set(batches.map((batch) => batch.folder.trim()).filter(Boolean))].sort((a, b) =>
+        a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }),
+      ),
+    [batches],
+  );
 
   const folders = useMemo<FolderGroup[]>(() => {
     const map = new Map<string, LeadsHubBatch[]>();
@@ -106,6 +123,12 @@ export default function LeadsFoldersPage() {
       setBatches((prev) => prev.map((batch) => (batch.folder.trim() === folderKey ? { ...batch, folder: normalized } : batch)));
       setDrafts((prev) => {
         const next = { ...prev };
+        delete next[folderKey];
+        if (normalized) next[normalized] = normalized;
+        return next;
+      });
+      setBatchDrafts((prev) => {
+        const next = { ...prev };
         for (const batch of group.items) next[batch.id] = normalized;
         return next;
       });
@@ -115,6 +138,36 @@ export default function LeadsFoldersPage() {
       setStatus((err as Error).message);
     } finally {
       setBusyFolders((prev) => ({ ...prev, [folderKey]: false }));
+    }
+  }
+
+  async function moveSingleBatch(batch: LeadsHubBatch) {
+    const nextFolder = normalizeFolderName(batchDrafts[batch.id] ?? batch.folder);
+    if (nextFolder === batch.folder) {
+      setStatus("Batch is already in that folder.");
+      return;
+    }
+    setMovingBatchIds((prev) => ({ ...prev, [batch.id]: true }));
+    setStatus("");
+    try {
+      await saveFolderForBatch(batch, nextFolder);
+      setBatches((prev) =>
+        prev.map((item) => (item.id === batch.id ? { ...item, folder: nextFolder } : item)),
+      );
+      setBatchDrafts((prev) => ({ ...prev, [batch.id]: nextFolder }));
+      setDrafts((prev) => {
+        const next = { ...prev };
+        const previousFolder = batch.folder.trim();
+        if (previousFolder && next[previousFolder] === undefined) next[previousFolder] = previousFolder;
+        if (nextFolder && next[nextFolder] === undefined) next[nextFolder] = nextFolder;
+        return next;
+      });
+      setStatus(nextFolder ? `Moved "${batch.name}" to "${nextFolder}"` : `Moved "${batch.name}" to Unsorted`);
+      broadcastLeadsHubUpdate();
+    } catch (err) {
+      setStatus((err as Error).message);
+    } finally {
+      setMovingBatchIds((prev) => ({ ...prev, [batch.id]: false }));
     }
   }
 
@@ -191,6 +244,31 @@ export default function LeadsFoldersPage() {
                       <div className="mt-0.5 truncate font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
                         {batch.leadCount} leads · {batch.fileName}
                       </div>
+                      <div className="mt-3 flex items-center gap-2">
+                        <Input
+                          value={batchDrafts[batch.id] ?? batch.folder}
+                          onChange={(e) =>
+                            setBatchDrafts((prev) => ({ ...prev, [batch.id]: e.target.value }))
+                          }
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              void moveSingleBatch(batch);
+                            }
+                          }}
+                          list="leads-folder-suggestions"
+                          placeholder="Move batch to folder"
+                          className="h-8 bg-white text-xs dark:bg-zinc-900"
+                        />
+                        <Button
+                          type="button"
+                          onClick={() => void moveSingleBatch(batch)}
+                          disabled={!!movingBatchIds[batch.id]}
+                          className="h-8 bg-zinc-900 px-3 text-xs text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-900"
+                        >
+                          {movingBatchIds[batch.id] ? "Moving…" : "Move"}
+                        </Button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -199,6 +277,12 @@ export default function LeadsFoldersPage() {
           })}
         </div>
       )}
+
+      <datalist id="leads-folder-suggestions">
+        {folderSuggestions.map((folder) => (
+          <option key={folder} value={folder} />
+        ))}
+      </datalist>
     </section>
   );
 }

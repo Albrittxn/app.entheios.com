@@ -40,6 +40,7 @@ export default function LeadsBatchesPage() {
   const [parseError, setParseError] = useState<string | null>(null);
   const [importingIds, setImportingIds] = useState<string[]>([]);
   const [folderDrafts, setFolderDrafts] = useState<Record<string, string>>({});
+  const [savingFolderIds, setSavingFolderIds] = useState<string[]>([]);
   const [dragOver, setDragOver] = useState(false);
 
   const [viewingBatch, setViewingBatch] = useState<LeadsHubBatch | null>(null);
@@ -76,6 +77,14 @@ export default function LeadsBatchesPage() {
       return next;
     });
   }, [batches]);
+
+  const folderSuggestions = useMemo(
+    () =>
+      [...new Set(batches.map((batch) => batch.folder.trim()).filter(Boolean))].sort((a, b) =>
+        a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }),
+      ),
+    [batches],
+  );
 
   useLeadsHubSync(() => {
     void loadBatches();
@@ -312,6 +321,14 @@ export default function LeadsBatchesPage() {
 
   async function saveBatchFolder(batch: LeadsHubBatch) {
     const folder = normalizeFolderName(folderDrafts[batch.id] ?? batch.folder);
+    if (folder === batch.folder) {
+      toast.show("Folder already up to date");
+      return;
+    }
+    setSavingFolderIds((prev) => [...prev, batch.id]);
+    const previousFolder = batch.folder;
+    setBatches((prev) => prev.map((item) => (item.id === batch.id ? { ...item, folder } : item)));
+    setFolderDrafts((prev) => ({ ...prev, [batch.id]: folder }));
     try {
       const res = await fetch("/api/leads-hub/batches", {
         method: "PATCH",
@@ -322,12 +339,16 @@ export default function LeadsBatchesPage() {
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.error || "Failed to update folder");
       }
-      setBatches((prev) => prev.map((item) => (item.id === batch.id ? { ...item, folder } : item)));
-      setFolderDrafts((prev) => ({ ...prev, [batch.id]: folder }));
       broadcastLeadsHubUpdate();
       toast.show(folder ? `Moved "${batch.name}" to ${folder}` : `Moved "${batch.name}" to Unsorted`);
     } catch (err) {
+      setBatches((prev) =>
+        prev.map((item) => (item.id === batch.id ? { ...item, folder: previousFolder } : item)),
+      );
+      setFolderDrafts((prev) => ({ ...prev, [batch.id]: previousFolder }));
       toast.show((err as Error).message || "Failed to update folder");
+    } finally {
+      setSavingFolderIds((prev) => prev.filter((id) => id !== batch.id));
     }
   }
 
@@ -714,15 +735,23 @@ export default function LeadsBatchesPage() {
                                     onChange={(e) =>
                                       setFolderDrafts((prev) => ({ ...prev, [b.id]: e.target.value }))
                                     }
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") {
+                                        e.preventDefault();
+                                        void saveBatchFolder(b);
+                                      }
+                                    }}
+                                    list="leads-hub-folder-suggestions"
                                     placeholder="Move to folder"
                                     className="h-7 text-[11px] bg-white dark:bg-zinc-900"
                                   />
                                   <Button
                                     type="button"
                                     onClick={() => void saveBatchFolder(b)}
+                                    disabled={savingFolderIds.includes(b.id)}
                                     className="h-7 shrink-0 bg-zinc-900 text-[11px] text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-900"
                                   >
-                                    Save
+                                    {savingFolderIds.includes(b.id) ? "Saving…" : "Save"}
                                   </Button>
                                 </div>
                                 <span className="mt-1 block font-mono text-[10px] text-zinc-500">
@@ -757,6 +786,12 @@ export default function LeadsBatchesPage() {
             )}
           </div>
         </div>
+
+        <datalist id="leads-hub-folder-suggestions">
+          {folderSuggestions.map((folder) => (
+            <option key={folder} value={folder} />
+          ))}
+        </datalist>
 
         <div className="lg:col-span-1">
           <AnimatePresence mode="wait">
