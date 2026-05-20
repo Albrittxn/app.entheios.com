@@ -35,6 +35,16 @@ export function SalesAdminView() {
   const [importingHub, setImportingHub] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  async function readJsonResponse(r: Response): Promise<Record<string, unknown>> {
+    const text = await r.text();
+    if (!text) return {};
+    try {
+      return JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      return { error: text };
+    }
+  }
+
   const load = useCallback(async () => {
     const r = await fetch("/api/sales/batches", { credentials: "same-origin" });
     if (!r.ok) return;
@@ -84,17 +94,23 @@ export function SalesAdminView() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ name: name.trim(), folder: folder.trim(), csv }),
       });
-      const j = await r.json();
+      const j = await readJsonResponse(r);
       if (!r.ok) {
-        setStatus({ msg: j.error ?? "Upload failed", err: true });
+        setStatus({ msg: String(j.error ?? "Upload failed"), err: true });
         return;
       }
-      setStatus({ msg: `Created ${j.batch.name} (${j.batch.lead_count} leads).` });
+      const batch = j.batch as { name?: string; lead_count?: number } | undefined;
+      setStatus({ msg: `Created ${batch?.name ?? name.trim()} (${batch?.lead_count ?? 0} leads).` });
       setName("");
       setFolder("");
       setCsv("");
       if (fileInputRef.current) fileInputRef.current.value = "";
       await load();
+    } catch (error) {
+      setStatus({
+        msg: error instanceof Error ? error.message : "Upload failed.",
+        err: true,
+      });
     } finally {
       setSubmitting(false);
     }
@@ -115,16 +131,22 @@ export function SalesAdminView() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ sourceBatchIds: selectedHubIds }),
       });
-      const j = await r.json();
+      const j = await readJsonResponse(r);
       if (!r.ok) {
-        setStatus({ msg: j.error ?? "Import failed", err: true });
+        setStatus({ msg: String(j.error ?? "Import failed"), err: true });
         return;
       }
+      const imported = Array.isArray(j.batches) ? j.batches.length : 0;
       setStatus({
-        msg: `Imported ${j.batches.length} batch${j.batches.length === 1 ? "" : "es"} from Leads Hub.`,
+        msg: `Imported ${imported} batch${imported === 1 ? "" : "es"} from Leads Hub.`,
       });
       setSelectedHubIds([]);
       await load();
+    } catch (error) {
+      setStatus({
+        msg: error instanceof Error ? error.message : "Import failed.",
+        err: true,
+      });
     } finally {
       setImportingHub(false);
     }
@@ -149,8 +171,8 @@ export function SalesAdminView() {
       credentials: "same-origin",
     });
     if (!r.ok) {
-      const j = await r.json().catch(() => ({}));
-      setStatus({ msg: (j as { error?: string }).error ?? "Failed to remove.", err: true });
+      const j = await readJsonResponse(r);
+      setStatus({ msg: String(j.error ?? "Failed to remove."), err: true });
       return;
     }
     setStatus({ msg: "Removed." });
@@ -173,6 +195,17 @@ export function SalesAdminView() {
 
   return (
     <div className="space-y-8">
+      {status.msg && (
+        <div
+          className={`rounded-md border px-4 py-3 text-sm ${
+            status.err
+              ? "border-rose-300 bg-rose-50 text-rose-700 dark:border-rose-800 dark:bg-rose-950/30 dark:text-rose-300"
+              : "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300"
+          }`}
+        >
+          {status.msg}
+        </div>
+      )}
       <section>
         <h2 className="text-base font-semibold tracking-tight">Import from Leads Hub</h2>
         <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
@@ -307,15 +340,6 @@ export function SalesAdminView() {
             </button>
           </div>
         </form>
-        {status.msg && (
-          <p
-            className={`mt-3 text-xs ${
-              status.err ? "text-rose-600 dark:text-rose-400" : "text-emerald-700 dark:text-emerald-400"
-            }`}
-          >
-            {status.msg}
-          </p>
-        )}
       </section>
 
       <section>

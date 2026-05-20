@@ -4,6 +4,7 @@
 //   batch:<id>               → Batch (meta + rows)
 //   batchstatus:<email>:<id> → UserBatchStatus
 
+import { del, get, list, put } from "@vercel/blob";
 import { kvGet, kvPut, kvDelete } from "@/lib/store";
 
 export type BatchMeta = {
@@ -23,6 +24,64 @@ export type UserBatchStatus = {
   completed_at?: number;
 };
 
+function blobConfigured(): boolean {
+  return Boolean(process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID);
+}
+
+function batchRowsPath(id: string): string {
+  return `sales/batches/${id}/rows.json`;
+}
+
+function batchMetaPath(id: string): string {
+  return `sales/batches/${id}/meta.json`;
+}
+
+function batchStatusPath(email: string, batchId: string): string {
+  return `sales/status/${encodeURIComponent(email.toLowerCase().trim())}/${batchId}.json`;
+}
+
+function blobConfigError(): Error {
+  return new Error(
+    "Sales batch storage requires Vercel Blob in production. Add a Blob store to this Vercel project so BLOB_READ_WRITE_TOKEN is available.",
+  );
+}
+
+function normalizeBatchMeta(meta: Partial<BatchMeta> & { id: string }): BatchMeta {
+  return {
+    id: meta.id,
+    name: meta.name ?? "",
+    folder: meta.folder ?? "",
+    lead_count: meta.lead_count ?? 0,
+    columns: meta.columns ?? [],
+    created_at: meta.created_at ?? Date.now(),
+    created_by: meta.created_by ?? "",
+  };
+}
+
+async function readBlobJson<T>(pathname: string): Promise<T | null> {
+  const result = await get(pathname, { access: "private" });
+  if (!result || result.statusCode !== 200 || !result.stream) return null;
+  const text = await new Response(result.stream).text();
+  return JSON.parse(text) as T;
+}
+
+async function writeBlobJson(pathname: string, value: unknown): Promise<void> {
+  await put(pathname, JSON.stringify(value), {
+    access: "private",
+    addRandomSuffix: false,
+    allowOverwrite: true,
+    contentType: "application/json",
+  });
+}
+
+async function deleteBlob(pathname: string): Promise<void> {
+  try {
+    await del(pathname);
+  } catch {
+    // Ignore deletes for already-missing blobs.
+  }
+}
+
 export function randomId(len = 8): string {
   const a = new Uint8Array(len);
   crypto.getRandomValues(a);
@@ -30,6 +89,33 @@ export function randomId(len = 8): string {
 }
 
 export async function listBatchIndex(): Promise<BatchMeta[]> {
+  if (blobConfigured()) {
+    const blobs: { pathname: string }[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await list({
+        prefix: "sales/batches/",
+        mode: "expanded",
+        limit: 1000,
+        ...(cursor ? { cursor } : {}),
+      });
+      blobs.push(...page.blobs);
+      cursor = page.hasMore ? page.cursor : undefined;
+    } while (cursor);
+
+    const metas = await Promise.all(
+      blobs
+        .filter((blob) => blob.pathname.endsWith("/meta.json"))
+        .map(async (blob) => {
+          const meta = await readBlobJson<Partial<BatchMeta> & { id: string }>(blob.pathname);
+          return meta ? normalizeBatchMeta(meta) : null;
+        }),
+    );
+
+    return metas
+      .filter((meta): meta is BatchMeta => Boolean(meta))
+      .sort((a, b) => b.created_at - a.created_at);
+  }
   return (await kvGet<BatchMeta[]>("batches:index")) ?? [];
 }
 
@@ -42,14 +128,34 @@ export async function replaceBatchIndex(items: BatchMeta[]): Promise<void> {
 }
 
 export async function getBatch(id: string): Promise<Batch | null> {
+  if (blobConfigured()) {
+    const [meta, rows] = await Promise.all([
+      readBlobJson<Partial<BatchMeta> & { id: string }>(batchMetaPath(id)),
+      readBlobJson<string[][]>(batchRowsPath(id)),
+    ]);
+    if (!meta || !rows) return null;
+    return { ...normalizeBatchMeta(meta), rows };
+  }
   return kvGet<Batch>(`batch:${id}`);
 }
 
 export async function putBatch(b: Batch): Promise<void> {
+  if (!blobConfigured() && process.env.VERCEL) throw blobConfigError();
+  if (blobConfigured()) {
+    await Promise.all([
+      writeBlobJson(batchMetaPath(b.id), normalizeBatchMeta(b)),
+      writeBlobJson(batchRowsPath(b.id), b.rows),
+    ]);
+    return;
+  }
   await kvPut(`batch:${b.id}`, b);
 }
 
 export async function deleteBatch(id: string): Promise<void> {
+  if (blobConfigured()) {
+    await Promise.all([deleteBlob(batchMetaPath(id)), deleteBlob(batchRowsPath(id))]);
+    return;
+  }
   await kvDelete(`batch:${id}`);
   const idx = await listBatchIndex();
   await writeBatchIndex(idx.filter((m) => m.id !== id));
@@ -57,6 +163,7 @@ export async function deleteBatch(id: string): Promise<void> {
 
 export async function addBatch(meta: BatchMeta, rows: string[][]): Promise<void> {
   await putBatch({ ...meta, rows });
+  if (blobConfigured()) return;
   const idx = await listBatchIndex();
   idx.unshift(meta);
   await writeBatchIndex(idx);
@@ -69,6 +176,7 @@ export async function addBatches(items: Array<{ meta: BatchMeta; rows: string[][
     // eslint-disable-next-line no-await-in-loop
     await putBatch({ ...meta, rows });
   }
+  if (blobConfigured()) return;
   const idx = await listBatchIndex();
   const next = [...items.map((item) => item.meta), ...idx];
   await writeBatchIndex(next);
@@ -78,6 +186,9 @@ export async function getUserBatchStatus(
   email: string,
   batchId: string,
 ): Promise<UserBatchStatus> {
+  if (blobConfigured()) {
+    return (await readBlobJson<UserBatchStatus>(batchStatusPath(email, batchId))) ?? {};
+  }
   return (await kvGet<UserBatchStatus>(`batchstatus:${email}:${batchId}`)) ?? {};
 }
 
@@ -86,6 +197,11 @@ export async function putUserBatchStatus(
   batchId: string,
   s: UserBatchStatus,
 ): Promise<void> {
+  if (!blobConfigured() && process.env.VERCEL) throw blobConfigError();
+  if (blobConfigured()) {
+    await writeBlobJson(batchStatusPath(email, batchId), s);
+    return;
+  }
   await kvPut(`batchstatus:${email}:${batchId}`, s);
 }
 

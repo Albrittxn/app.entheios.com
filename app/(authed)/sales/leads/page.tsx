@@ -1,11 +1,11 @@
-import { getSession } from "@/lib/auth";
+import { getEffectiveUser } from "@/lib/effective-user";
 import { isAdminEmail } from "@/lib/permissions";
 import { SalesAdminView } from "../admin/sales-admin-view";
 import { SalesLeadsView } from "./leads-view";
 
 export default async function SalesLeadsPage() {
-  const session = await getSession();
-  const isAdmin = isAdminEmail(session?.email);
+  const ctx = await getEffectiveUser();
+  const isAdmin = Boolean(ctx && isAdminEmail(ctx.effectiveEmail));
 
   return (
     <section>

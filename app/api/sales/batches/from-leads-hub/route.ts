@@ -85,6 +85,11 @@ export async function POST(req: Request) {
     toCreate.push({ meta, rows });
   }
 
-  await addBatches(toCreate);
-  return NextResponse.json({ ok: true, batches: toCreate.map((item) => item.meta) });
+  try {
+    await addBatches(toCreate);
+    return NextResponse.json({ ok: true, batches: toCreate.map((item) => item.meta) });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to import batches.";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }

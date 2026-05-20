@@ -66,8 +66,13 @@ export async function POST(req: Request) {
     created_at: Date.now(),
     created_by: session.email.toLowerCase(),
   };
-  await addBatch(meta, rows);
-  return NextResponse.json({ ok: true, batch: meta });
+  try {
+    await addBatch(meta, rows);
+    return NextResponse.json({ ok: true, batch: meta });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to create batch.";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }
 
 export async function DELETE(req: Request) {
@@ -78,6 +83,11 @@ export async function DELETE(req: Request) {
   const url = new URL(req.url);
   const id = url.searchParams.get("id");
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
-  await deleteBatch(id);
-  return NextResponse.json({ ok: true });
+  try {
+    await deleteBatch(id);
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to delete batch.";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }
