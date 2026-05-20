@@ -11,13 +11,26 @@ type BatchMeta = {
   created_by: string;
 };
 
+type LeadsHubBatch = {
+  id: string;
+  name: string;
+  fileName: string;
+  leadCount: number;
+  uploadedAt: string;
+};
+
 export function SalesAdminView() {
   const [batches, setBatches] = useState<BatchMeta[]>([]);
+  const [hubBatches, setHubBatches] = useState<LeadsHubBatch[]>([]);
   const [loading, setLoading] = useState(true);
+  const [hubLoading, setHubLoading] = useState(true);
   const [name, setName] = useState("");
   const [csv, setCsv] = useState("");
+  const [hubSourceId, setHubSourceId] = useState("");
+  const [hubName, setHubName] = useState("");
   const [status, setStatus] = useState<{ msg: string; err?: boolean }>({ msg: "" });
   const [submitting, setSubmitting] = useState(false);
+  const [importingHub, setImportingHub] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const load = useCallback(async () => {
@@ -28,9 +41,27 @@ export function SalesAdminView() {
     setLoading(false);
   }, []);
 
+  const loadHubBatches = useCallback(async () => {
+    try {
+      const r = await fetch("/api/leads-hub/batches", { credentials: "same-origin" });
+      if (!r.ok) return;
+      const j = (await r.json()) as { batches: LeadsHubBatch[] };
+      const next = j.batches || [];
+      setHubBatches(next);
+      setHubSourceId((current) => current || next[0]?.id || "");
+      setHubName((current) => current || next[0]?.name || "");
+    } finally {
+      setHubLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    loadHubBatches();
+  }, [loadHubBatches]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -59,6 +90,35 @@ export function SalesAdminView() {
       await load();
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function importFromLeadsHub(e: React.FormEvent) {
+    e.preventDefault();
+    setStatus({ msg: "" });
+    if (!hubSourceId) {
+      setStatus({ msg: "Choose a Leads Hub batch.", err: true });
+      return;
+    }
+    setImportingHub(true);
+    try {
+      const r = await fetch("/api/sales/batches/from-leads-hub", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sourceBatchId: hubSourceId, name: hubName.trim() }),
+      });
+      const j = await r.json();
+      if (!r.ok) {
+        setStatus({ msg: j.error ?? "Import failed", err: true });
+        return;
+      }
+      setStatus({
+        msg: `Imported ${j.batch.name} from Leads Hub (${j.batch.lead_count} leads).`,
+      });
+      await load();
+    } finally {
+      setImportingHub(false);
     }
   }
 
@@ -91,6 +151,45 @@ export function SalesAdminView() {
 
   return (
     <div className="space-y-8">
+      <section>
+        <h2 className="text-base font-semibold tracking-tight">Import from Leads Hub</h2>
+        <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+          Pick an existing Leads Hub batch and turn it into a Sales batch without leaving the Leads tab.
+        </p>
+        <form onSubmit={importFromLeadsHub} className="mt-4 space-y-3">
+          <select
+            value={hubSourceId}
+            onChange={(e) => {
+              setHubSourceId(e.target.value);
+              const selected = hubBatches.find((b) => b.id === e.target.value);
+              if (selected) setHubName(selected.name);
+            }}
+            className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm focus:border-zinc-900 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:focus:border-zinc-100"
+          >
+            <option value="">{hubLoading ? "Loading Leads Hub batches..." : "Select a Leads Hub batch"}</option>
+            {hubBatches.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.name} ({b.leadCount} leads)
+              </option>
+            ))}
+          </select>
+          <input
+            type="text"
+            value={hubName}
+            onChange={(e) => setHubName(e.target.value)}
+            placeholder="Sales batch name"
+            className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm focus:border-zinc-900 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:focus:border-zinc-100"
+          />
+          <button
+            type="submit"
+            disabled={importingHub || !hubSourceId}
+            className="inline-flex h-10 items-center rounded-md bg-zinc-900 px-5 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          >
+            {importingHub ? "Importing…" : "Import selected batch"}
+          </button>
+        </form>
+      </section>
+
       <section>
         <h2 className="text-base font-semibold tracking-tight">Upload batch</h2>
         <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
