@@ -445,6 +445,7 @@ export default function LeadsHubPage() {
               onPaste={onPasteZone}
               onClick={() => fileRef.current?.click()}
               onKeyDown={(e) => {
+                if (e.target !== e.currentTarget) return;
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
                   fileRef.current?.click();
