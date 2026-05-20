@@ -6,6 +6,7 @@ type UserBatchStatus = { downloaded_at?: number; completed_at?: number };
 type BatchRow = {
   id: string;
   name: string;
+  folder?: string;
   lead_count: number;
   columns: string[];
   created_at: number;
@@ -21,7 +22,16 @@ function uiStatus(b: BatchRow): "pending" | "downloaded" | "complete" {
   return "pending";
 }
 
-export function SalesLeadsView() {
+type SalesLeadsViewProps = {
+  isAdmin: boolean;
+};
+
+type FolderGroup = {
+  folder: string;
+  items: BatchRow[];
+};
+
+export function SalesLeadsView({ isAdmin }: SalesLeadsViewProps) {
   const [batches, setBatches] = useState<BatchRow[]>([]);
   const [filter, setFilter] = useState<Filter>("all");
   const [loading, setLoading] = useState(true);
@@ -84,6 +94,16 @@ export function SalesLeadsView() {
   };
 
   const visible = batches.filter((b) => filter === "all" || uiStatus(b) === filter);
+  const grouped = visible.reduce<FolderGroup[]>((acc, batch) => {
+    const folder = batch.folder?.trim() || "";
+    const current = acc[acc.length - 1];
+    if (current && current.folder === folder) {
+      current.items.push(batch);
+      return acc;
+    }
+    acc.push({ folder, items: [batch] });
+    return acc;
+  }, []);
 
   if (error) {
     return (
@@ -125,66 +145,81 @@ export function SalesLeadsView() {
             : "No batches in this view."}
         </div>
       ) : (
-        <div className="space-y-2">
-          {visible.map((b) => {
-            const s = uiStatus(b);
-            const dt = new Date(b.created_at).toISOString().slice(0, 10);
-            return (
-              <div
-                key={b.id}
-                className={`grid grid-cols-1 items-center gap-3 rounded-lg border p-4 sm:grid-cols-[1.4fr_auto_auto_auto] ${
-                  s === "complete"
-                    ? "border-emerald-300 bg-emerald-50/60 dark:border-emerald-800 dark:bg-emerald-950/20"
-                    : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
-                }`}
-              >
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                    {b.name}
-                  </div>
-                  <div className="mt-0.5 font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
-                    added {dt}
-                    {b.status?.completed_at
-                      ? ` · done ${new Date(b.status.completed_at).toISOString().slice(0, 10)}`
-                      : b.status?.downloaded_at
-                      ? ` · pulled ${new Date(b.status.downloaded_at).toISOString().slice(0, 10)}`
-                      : ""}
-                  </div>
-                </div>
-                <div className="font-mono text-xs text-zinc-500 dark:text-zinc-400">
-                  {b.lead_count} leads
-                </div>
-                <StatusPill s={s} />
-                <div className="flex items-center gap-2">
-                  <a
-                    href={`/api/sales/batches/${encodeURIComponent(b.id)}/csv`}
-                    onClick={() => onDownload(b)}
-                    className="inline-flex h-8 items-center rounded-md bg-zinc-900 px-3 text-xs font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-                    download
-                  >
-                    Download CSV
-                  </a>
-                  {s === "complete" ? (
-                    <button
-                      type="button"
-                      onClick={() => setComplete(b.id, false)}
-                      className="h-8 rounded-md border border-zinc-300 px-3 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
-                    >
-                      Reopen
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setComplete(b.id, true)}
-                      className="h-8 rounded-md border border-zinc-300 px-3 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
-                    >
-                      Mark complete
-                    </button>
-                  )}
+        <div className="space-y-6">
+          {grouped.map((group) => (
+            <section key={group.folder || "unsorted"} className="space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+                    {group.folder || "Unsorted"}
+                  </h2>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                    {group.items.length} {group.items.length === 1 ? "batch" : "batches"}
+                  </p>
                 </div>
               </div>
-            );
-          })}
+              {group.items.map((b) => {
+                const s = uiStatus(b);
+                const dt = new Date(b.created_at).toISOString().slice(0, 10);
+                return (
+                  <div
+                    key={b.id}
+                    className={`grid grid-cols-1 items-center gap-3 rounded-lg border p-4 sm:grid-cols-[1.4fr_auto_auto_auto] ${
+                      s === "complete"
+                        ? "border-emerald-300 bg-emerald-50/60 dark:border-emerald-800 dark:bg-emerald-950/20"
+                        : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                        {b.name}
+                      </div>
+                      <div className="mt-0.5 font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
+                        added {dt}
+                        {b.status?.completed_at
+                          ? ` · done ${new Date(b.status.completed_at).toISOString().slice(0, 10)}`
+                          : b.status?.downloaded_at
+                            ? ` · pulled ${new Date(b.status.downloaded_at).toISOString().slice(0, 10)}`
+                            : ""}
+                      </div>
+                    </div>
+                    <div className="font-mono text-xs text-zinc-500 dark:text-zinc-400">
+                      {b.lead_count} leads
+                    </div>
+                    <StatusPill s={s} />
+                    <div className="flex items-center gap-2">
+                      <a
+                        href={`/api/sales/batches/${encodeURIComponent(b.id)}/csv`}
+                        onClick={() => onDownload(b)}
+                        className="inline-flex h-8 items-center rounded-md bg-zinc-900 px-3 text-xs font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+                        download
+                      >
+                        Download CSV
+                      </a>
+                      {isAdmin &&
+                        (s === "complete" ? (
+                          <button
+                            type="button"
+                            onClick={() => setComplete(b.id, false)}
+                            className="h-8 rounded-md border border-zinc-300 px-3 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+                          >
+                            Reopen
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setComplete(b.id, true)}
+                            className="h-8 rounded-md border border-zinc-300 px-3 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+                          >
+                            Mark complete
+                          </button>
+                        ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </section>
+          ))}
         </div>
       )}
     </div>

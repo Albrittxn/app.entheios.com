@@ -12,7 +12,7 @@ export default async function SalesLeadsPage() {
       <header className="mb-6">
         <h1 className="text-2xl font-semibold tracking-tight">Leads</h1>
         <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-          Lead batches — download the CSV, import to GHL, mark complete when dialed. Each batch is ~100 leads.
+          Lead batches grouped by folder so the team can find the right list quickly and download the CSV into GHL.
         </p>
       </header>
       {isAdmin && (
@@ -26,7 +26,7 @@ export default async function SalesLeadsPage() {
           </div>
         </div>
       )}
-      <SalesLeadsView />
+      <SalesLeadsView isAdmin={isAdmin} />
     </section>
   );
 }

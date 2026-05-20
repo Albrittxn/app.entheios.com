@@ -40,6 +40,10 @@ export async function POST(req: Request) {
   const b = body as { name?: unknown; csv?: unknown };
   const name = typeof b.name === "string" ? b.name.trim().slice(0, 120) : "";
   const csv = typeof b.csv === "string" ? b.csv : "";
+  const folder =
+    typeof (b as { folder?: unknown }).folder === "string"
+      ? (b as { folder: string }).folder.trim().slice(0, 120)
+      : "";
   if (!name) return NextResponse.json({ error: "Name required" }, { status: 400 });
   if (!csv) return NextResponse.json({ error: "CSV required" }, { status: 400 });
   if (csv.length > 5_000_000)
@@ -56,6 +60,7 @@ export async function POST(req: Request) {
   const meta: BatchMeta = {
     id: randomId(),
     name,
+    ...(folder ? { folder } : {}),
     lead_count: rows.length,
     columns,
     created_at: Date.now(),

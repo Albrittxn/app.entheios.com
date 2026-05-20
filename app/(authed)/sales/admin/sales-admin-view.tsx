@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 type BatchMeta = {
   id: string;
   name: string;
+  folder?: string;
   lead_count: number;
   columns: string[];
   created_at: number;
@@ -17,6 +18,7 @@ type LeadsHubBatch = {
   fileName: string;
   leadCount: number;
   uploadedAt: string;
+  folder: string;
 };
 
 export function SalesAdminView() {
@@ -25,6 +27,7 @@ export function SalesAdminView() {
   const [loading, setLoading] = useState(true);
   const [hubLoading, setHubLoading] = useState(true);
   const [name, setName] = useState("");
+  const [folder, setFolder] = useState("");
   const [csv, setCsv] = useState("");
   const [selectedHubIds, setSelectedHubIds] = useState<string[]>([]);
   const [status, setStatus] = useState<{ msg: string; err?: boolean }>({ msg: "" });
@@ -79,7 +82,7 @@ export function SalesAdminView() {
         method: "POST",
         credentials: "same-origin",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), csv }),
+        body: JSON.stringify({ name: name.trim(), folder: folder.trim(), csv }),
       });
       const j = await r.json();
       if (!r.ok) {
@@ -88,6 +91,7 @@ export function SalesAdminView() {
       }
       setStatus({ msg: `Created ${j.batch.name} (${j.batch.lead_count} leads).` });
       setName("");
+      setFolder("");
       setCsv("");
       if (fileInputRef.current) fileInputRef.current.value = "";
       await load();
@@ -225,7 +229,7 @@ export function SalesAdminView() {
                         {b.name}
                       </div>
                       <div className="mt-0.5 truncate font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
-                        {b.leadCount} leads · {b.fileName}
+                        {b.leadCount} leads · {b.folder || "Unsorted"} · {b.fileName}
                       </div>
                     </div>
                   </label>
@@ -264,6 +268,13 @@ export function SalesAdminView() {
             onChange={(e) => setName(e.target.value)}
             placeholder="Batch name (e.g. 2026-05-12_batch_01)"
             required
+            className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm focus:border-zinc-900 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:focus:border-zinc-100"
+          />
+          <input
+            type="text"
+            value={folder}
+            onChange={(e) => setFolder(e.target.value)}
+            placeholder="Folder (optional)"
             className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm focus:border-zinc-900 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:focus:border-zinc-100"
           />
           <textarea
@@ -325,7 +336,7 @@ export function SalesAdminView() {
                     {b.name}
                   </div>
                   <div className="mt-0.5 truncate font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
-                    {b.lead_count} leads · {new Date(b.created_at).toISOString().slice(0, 10)} · cols: {b.columns.join(", ")}
+                    {b.folder || "Unsorted"} · {b.lead_count} leads · {new Date(b.created_at).toISOString().slice(0, 10)} · cols: {b.columns.join(", ")}
                   </div>
                 </div>
                 <button

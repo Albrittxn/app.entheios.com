@@ -75,6 +75,7 @@ export async function POST(req: Request) {
     const meta: BatchMeta = {
       id: randomId(),
       name: source.name,
+      ...(source.folder ? { folder: source.folder } : {}),
       lead_count: rows.length,
       columns: ["First Name", "Last Name", "Phone", "Email", "Brokerage", "State"],
       created_at: Date.now(),

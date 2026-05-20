@@ -9,6 +9,7 @@ import { kvGet, kvPut, kvDelete } from "@/lib/store";
 export type BatchMeta = {
   id: string;
   name: string;
+  folder?: string;
   lead_count: number;
   columns: string[];
   created_at: number;
