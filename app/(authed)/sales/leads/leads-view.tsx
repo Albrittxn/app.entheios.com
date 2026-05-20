@@ -58,6 +58,31 @@ export function SalesLeadsView({ isAdmin: _isAdmin }: SalesLeadsViewProps) {
     load();
   }, [load]);
 
+  async function moveToNew(id: string) {
+    const previous = batches;
+    setBatches((current) =>
+      current.map((batch) =>
+        batch.id === id
+          ? {
+              ...batch,
+              status: {
+                ...batch.status,
+                downloaded_at: undefined,
+                completed_at: undefined,
+              },
+            }
+          : batch,
+      ),
+    );
+
+    const r = await fetch(`/api/sales/batches/${encodeURIComponent(id)}/complete`, {
+      method: "DELETE",
+      credentials: "same-origin",
+    });
+    if (r.ok) return;
+    setBatches(previous);
+  }
+
   function onDownload(b: BatchRow) {
     // Optimistically move the batch into Downloaded immediately for this user.
     setBatches((prev) =>
@@ -229,6 +254,15 @@ export function SalesLeadsView({ isAdmin: _isAdmin }: SalesLeadsViewProps) {
                       >
                         Download CSV
                       </a>
+                      {s === "downloaded" && (
+                        <button
+                          type="button"
+                          onClick={() => void moveToNew(b.id)}
+                          className="h-8 rounded-md border border-zinc-300 px-3 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+                        >
+                          Move to New
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
