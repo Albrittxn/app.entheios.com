@@ -18,6 +18,8 @@ import {
   formatState,
 } from "@/lib/format";
 
+export const runtime = "nodejs";
+
 export async function GET() {
   const ctx = await getEffectiveUser();
   if (!ctx) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -90,8 +92,14 @@ export async function POST(req: Request) {
     uploadedBy: session.email.toLowerCase(),
   };
 
-  await addLeadsHubBatch(meta, formattedLeads);
-  return NextResponse.json({ ok: true, batch: meta, leads: formattedLeads });
+  try {
+    await addLeadsHubBatch(meta, formattedLeads);
+    return NextResponse.json({ ok: true, batch: meta, leads: formattedLeads });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to save imported leads.";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }
 
 export async function DELETE(req: Request) {

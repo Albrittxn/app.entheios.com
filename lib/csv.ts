@@ -15,7 +15,7 @@ export type ParsedCsv = {
 export async function parseSheet(file: File): Promise<ParsedCsv> {
   const name = file.name.toLowerCase();
   if (name.endsWith(".csv")) {
-    const text = await file.text();
+    const text = stripBom(await file.text());
     return parseCsv(text);
   }
   if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
@@ -42,7 +42,7 @@ export async function parseSheet(file: File): Promise<ParsedCsv> {
 }
 
 export function parseCsv(text: string, delimiter: string = ","): ParsedCsv {
-  const cleaned = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const cleaned = stripBom(text).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   const lines: string[] = [];
   let buf = "";
   let inQuotes = false;
@@ -117,7 +117,11 @@ function parseLine(line: string, delimiter: string = ","): string[] {
 // Normalize a header for fuzzy matching: lowercase, alphanumeric only.
 // "First Name" / "first_name" / "firstName" all → "firstname".
 export function normalizeHeader(h: string): string {
-  return h.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return stripBom(h).toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function stripBom(text: string): string {
+  return text.replace(/^\uFEFF/, "");
 }
 
 export const REQUIRED_COLUMNS = [

@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { deleteLeadsHubLead } from "@/lib/leads-hub-store";
 
+export const runtime = "nodejs";
+
 export async function DELETE(
   req: Request,
   props: { params: Promise<{ id: string }> },

@@ -8,6 +8,8 @@ import {
   type LeadsHubLead,
 } from "@/lib/leads-hub-store";
 
+export const runtime = "nodejs";
+
 export async function GET(req: Request) {
   const ctx = await getEffectiveUser();
   if (!ctx) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
