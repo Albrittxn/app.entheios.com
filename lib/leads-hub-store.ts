@@ -1,8 +1,5 @@
-import { del, get, put } from "@vercel/blob";
+import { del, get, list, put } from "@vercel/blob";
 import { kvDelete, kvGet, kvPut } from "@/lib/store";
-
-const INDEX_KEY = "leads_hub_batches_index";
-const INDEX_PATH = "leads-hub/index.json";
 
 export type LeadsHubBatch = {
   id: string;
@@ -41,6 +38,10 @@ function batchPath(id: string): string {
   return `leads-hub/batches/${id}/leads.json`;
 }
 
+function batchMetaPath(id: string): string {
+  return `leads-hub/batches/${id}/meta.json`;
+}
+
 function blobConfigError(): Error {
   return new Error(
     "Leads Hub storage requires Vercel Blob. Add a Blob store to this Vercel project so BLOB_READ_WRITE_TOKEN is available.",
@@ -73,17 +74,33 @@ async function deleteBlob(pathname: string): Promise<void> {
 
 export async function listLeadsHubBatches(): Promise<LeadsHubBatch[]> {
   if (blobConfigured()) {
-    return (await readBlobJson<LeadsHubBatch[]>(INDEX_PATH)) ?? [];
-  }
-  return (await kvGet<LeadsHubBatch[]>(INDEX_KEY)) ?? [];
-}
+    const blobs: { pathname: string }[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await list({
+        prefix: "leads-hub/batches/",
+        mode: "expanded",
+        limit: 1000,
+        ...(cursor ? { cursor } : {}),
+      });
+      blobs.push(...page.blobs);
+      cursor = page.hasMore ? page.cursor : undefined;
+    } while (cursor);
 
-export async function writeLeadsHubBatchesIndex(batches: LeadsHubBatch[]): Promise<void> {
-  if (blobConfigured()) {
-    await writeBlobJson(INDEX_PATH, batches);
-    return;
+    const metas = await Promise.all(
+      blobs
+        .filter((blob) => blob.pathname.endsWith("/meta.json"))
+        .map(async (blob) => {
+          const meta = await readBlobJson<LeadsHubBatch>(blob.pathname);
+          return meta;
+        }),
+    );
+
+    return metas
+      .filter((meta): meta is LeadsHubBatch => Boolean(meta))
+      .sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
   }
-  await kvPut(INDEX_KEY, batches);
+  return (await kvGet<LeadsHubBatch[]>("leads_hub_batches_index")) ?? [];
 }
 
 export async function getLeadsHubBatch(id: string): Promise<LeadsHubLead[]> {
@@ -109,20 +126,25 @@ export async function addLeadsHubBatch(
     throw blobConfigError();
   }
   await putLeadsHubBatch(meta.id, leads);
+  if (blobConfigured()) {
+    await writeBlobJson(batchMetaPath(meta.id), meta);
+    return;
+  }
   const index = await listLeadsHubBatches();
   index.unshift(meta);
-  await writeLeadsHubBatchesIndex(index);
+  await kvPut("leads_hub_batches_index", index);
 }
 
 export async function deleteLeadsHubBatch(id: string): Promise<void> {
   if (blobConfigured()) {
     await deleteBlob(batchPath(id));
-  } else {
-    await kvDelete(batchPath(id));
+    await deleteBlob(batchMetaPath(id));
+    return;
   }
 
+  await kvDelete(batchPath(id));
   const index = await listLeadsHubBatches();
-  await writeLeadsHubBatchesIndex(index.filter((b) => b.id !== id));
+  await kvPut("leads_hub_batches_index", index.filter((b) => b.id !== id));
 }
 
 export async function deleteLeadsHubLead(batchId: string, leadId: string): Promise<void> {
@@ -130,11 +152,17 @@ export async function deleteLeadsHubLead(batchId: string, leadId: string): Promi
   const nextLeads = leads.filter((l) => l.id !== leadId);
   await putLeadsHubBatch(batchId, nextLeads);
 
+  if (blobConfigured()) {
+    const meta = await readBlobJson<LeadsHubBatch>(batchMetaPath(batchId));
+    if (meta) {
+      await writeBlobJson(batchMetaPath(batchId), { ...meta, leadCount: nextLeads.length });
+    }
+    return;
+  }
+
   const index = await listLeadsHubBatches();
-  const nextIndex = index.map((b) =>
-    b.id === batchId ? { ...b, leadCount: nextLeads.length } : b,
-  );
-  await writeLeadsHubBatchesIndex(nextIndex);
+  const nextIndex = index.map((b) => (b.id === batchId ? { ...b, leadCount: nextLeads.length } : b));
+  await kvPut("leads_hub_batches_index", nextIndex);
 }
 
 export async function restoreLeadsHubLead(lead: LeadsHubLead): Promise<void> {
@@ -142,11 +170,17 @@ export async function restoreLeadsHubLead(lead: LeadsHubLead): Promise<void> {
   leads.push(lead);
   await putLeadsHubBatch(lead.batchId, leads);
 
+  if (blobConfigured()) {
+    const meta = await readBlobJson<LeadsHubBatch>(batchMetaPath(lead.batchId));
+    if (meta) {
+      await writeBlobJson(batchMetaPath(lead.batchId), { ...meta, leadCount: leads.length });
+    }
+    return;
+  }
+
   const index = await listLeadsHubBatches();
-  const nextIndex = index.map((b) =>
-    b.id === lead.batchId ? { ...b, leadCount: leads.length } : b,
-  );
-  await writeLeadsHubBatchesIndex(nextIndex);
+  const nextIndex = index.map((b) => (b.id === lead.batchId ? { ...b, leadCount: leads.length } : b));
+  await kvPut("leads_hub_batches_index", nextIndex);
 }
 
 export async function getLeadsHubAllLeads(): Promise<LeadsHubLead[]> {
