@@ -37,8 +37,20 @@ function batchMetaPath(id: string): string {
   return `sales/batches/${id}/meta.json`;
 }
 
+function normalizeStatusEmail(email: string): string {
+  return email.toLowerCase().trim();
+}
+
+function batchStatusUserKey(email: string): string {
+  return Buffer.from(normalizeStatusEmail(email)).toString("base64url");
+}
+
 function batchStatusPath(email: string, batchId: string): string {
-  return `sales/status/${encodeURIComponent(email.toLowerCase().trim())}/${batchId}.json`;
+  return `sales/status/${batchStatusUserKey(email)}/${batchId}.json`;
+}
+
+function legacyBatchStatusPath(email: string, batchId: string): string {
+  return `sales/status/${encodeURIComponent(normalizeStatusEmail(email))}/${batchId}.json`;
 }
 
 function batchFoldersPath(): string {
@@ -265,9 +277,17 @@ export async function getUserBatchStatus(
   batchId: string,
 ): Promise<UserBatchStatus> {
   if (blobConfigured()) {
-    return (await readBlobJson<UserBatchStatus>(batchStatusPath(email, batchId))) ?? {};
+    const currentPath = batchStatusPath(email, batchId);
+    const current = await readBlobJson<UserBatchStatus>(currentPath);
+    if (current) return current;
+
+    const legacyPath = legacyBatchStatusPath(email, batchId);
+    if (legacyPath !== currentPath) {
+      return (await readBlobJson<UserBatchStatus>(legacyPath)) ?? {};
+    }
+    return {};
   }
-  return (await kvGet<UserBatchStatus>(`batchstatus:${email}:${batchId}`)) ?? {};
+  return (await kvGet<UserBatchStatus>(`batchstatus:${normalizeStatusEmail(email)}:${batchId}`)) ?? {};
 }
 
 export async function putUserBatchStatus(
@@ -277,10 +297,16 @@ export async function putUserBatchStatus(
 ): Promise<void> {
   if (!blobConfigured() && process.env.VERCEL) throw blobConfigError();
   if (blobConfigured()) {
-    await writeBlobJson(batchStatusPath(email, batchId), s);
+    const currentPath = batchStatusPath(email, batchId);
+    await writeBlobJson(currentPath, s);
+
+    const legacyPath = legacyBatchStatusPath(email, batchId);
+    if (legacyPath !== currentPath) {
+      await deleteBlob(legacyPath);
+    }
     return;
   }
-  await kvPut(`batchstatus:${email}:${batchId}`, s);
+  await kvPut(`batchstatus:${normalizeStatusEmail(email)}:${batchId}`, s);
 }
 
 // ── CSV ─────────────────────────────────────────────────────────────────
