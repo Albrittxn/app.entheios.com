@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { broadcastLeadsHubUpdate, useLeadsHubSync } from "@/lib/leads-hub-sync";
@@ -29,6 +29,23 @@ export default function LeadsFoldersPage() {
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [deletingFolder, setDeletingFolder] = useState<string | null>(null);
   const [status, setStatus] = useState<string>("");
+  const optimisticCreatedFoldersRef = useRef<Set<string>>(new Set());
+  const optimisticDeletedFoldersRef = useRef<Set<string>>(new Set());
+
+  function mergeFolderState(serverFolders: string[], batchList: LeadsHubBatch[]): string[] {
+    const next = new Set<string>();
+    for (const folder of serverFolders) {
+      const normalized = normalizeFolderName(folder);
+      if (normalized) next.add(normalized);
+    }
+    for (const batch of batchList) {
+      const normalized = normalizeFolderName(batch.folder);
+      if (normalized) next.add(normalized);
+    }
+    for (const folder of optimisticCreatedFoldersRef.current) next.add(folder);
+    for (const folder of optimisticDeletedFoldersRef.current) next.delete(folder);
+    return [...next].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }));
+  }
 
   async function loadBatches() {
     try {
@@ -36,7 +53,7 @@ export default function LeadsFoldersPage() {
       if (!res.ok) return;
       const data = (await res.json()) as { batches: LeadsHubBatch[]; folders?: string[] };
       setBatches(data.batches || []);
-      setFoldersList(data.folders || []);
+      setFoldersList(mergeFolderState(data.folders || [], data.batches || []));
     } finally {
       setLoading(false);
     }
@@ -195,6 +212,8 @@ export default function LeadsFoldersPage() {
       });
       const data = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) throw new Error(data.error ?? "Failed to delete folder");
+      optimisticDeletedFoldersRef.current.add(folder);
+      optimisticCreatedFoldersRef.current.delete(folder);
       setFoldersList((prev) => prev.filter((item) => item !== folder));
       setBatches((prev) =>
         prev.map((batch) =>
@@ -204,6 +223,7 @@ export default function LeadsFoldersPage() {
       setStatus(`Deleted "${folder}"`);
       broadcastLeadsHubUpdate();
     } catch (err) {
+      optimisticDeletedFoldersRef.current.delete(folder);
       setStatus((err as Error).message);
     } finally {
       setDeletingFolder(null);
@@ -230,17 +250,21 @@ export default function LeadsFoldersPage() {
       });
       const data = (await res.json().catch(() => ({}))) as { error?: string; folder?: string };
       if (!res.ok) throw new Error(data.error ?? "Failed to create folder");
+      const createdFolder = normalizeFolderName(data.folder ?? folder);
+      optimisticCreatedFoldersRef.current.add(createdFolder);
+      optimisticDeletedFoldersRef.current.delete(createdFolder);
       setFoldersList((prev) =>
-        [...new Set([...prev, data.folder ?? folder])].sort((a, b) =>
+        [...new Set([...prev, createdFolder])].sort((a, b) =>
           a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }),
         ),
       );
-      setDrafts((prev) => ({ ...prev, [folder]: folder }));
-      setCollapsedFolders((prev) => ({ ...prev, [folder]: false }));
+      setDrafts((prev) => ({ ...prev, [createdFolder]: createdFolder }));
+      setCollapsedFolders((prev) => ({ ...prev, [createdFolder]: false }));
       setNewFolderName("");
-      setStatus(`Created "${data.folder ?? folder}"`);
+      setStatus(`Created "${createdFolder}"`);
       broadcastLeadsHubUpdate();
     } catch (err) {
+      optimisticCreatedFoldersRef.current.delete(folder);
       setStatus((err as Error).message);
     } finally {
       setCreatingFolder(false);
