@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useToast } from "@/components/toast-provider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { broadcastLeadsHubUpdate, useLeadsHubSync } from "@/lib/leads-hub-sync";
 import { cn } from "@/lib/utils";
 import {
   parseSheet,
@@ -65,6 +66,26 @@ export default function LeadsBatchesPage() {
     loadBatches();
   }, []);
 
+  useLeadsHubSync(() => {
+    void loadBatches();
+    if (viewingBatch) {
+      void (async () => {
+        const res = await fetch(`/api/leads-hub/leads?batchId=${viewingBatch.id}`);
+        if (res.ok) {
+          const data = await res.json();
+          setViewingLeads(data.leads || []);
+          setBatches((prev) =>
+            prev.map((b) =>
+              b.id === viewingBatch.id
+                ? { ...b, leadCount: (data.leads || []).length }
+                : b,
+            ),
+          );
+        }
+      })();
+    }
+  });
+
   // Open Drawer to inspect leads inside a batch
   async function handleViewLeads(batch: LeadsHubBatch) {
     setViewingBatch(batch);
@@ -118,6 +139,7 @@ export default function LeadsBatchesPage() {
           if (restoreRes.ok) {
             toast.show(`Restored lead list "${batch.name}"`);
             await loadBatches();
+            broadcastLeadsHubUpdate();
           }
         },
       });
@@ -126,6 +148,7 @@ export default function LeadsBatchesPage() {
       if (viewingBatch?.id === batch.id) {
         setViewingBatch(null);
       }
+      broadcastLeadsHubUpdate();
     } catch (err) {
       console.error(err);
       toast.show("Error deleting batch");
@@ -153,6 +176,7 @@ export default function LeadsBatchesPage() {
           return b;
         })
       );
+      broadcastLeadsHubUpdate();
 
       toast.show(`Removed ${lead.firstName} ${lead.lastName}`, {
         undo: async () => {
@@ -173,6 +197,7 @@ export default function LeadsBatchesPage() {
               })
             );
             toast.show(`Restored ${lead.firstName} ${lead.lastName}`);
+            broadcastLeadsHubUpdate();
           }
         },
       });
@@ -290,6 +315,7 @@ export default function LeadsBatchesPage() {
       setPending(null);
       if (fileRef.current) fileRef.current.value = "";
       await loadBatches();
+      broadcastLeadsHubUpdate();
     } catch (err) {
       setParseError((err as Error).message);
     } finally {
@@ -465,7 +491,7 @@ export default function LeadsBatchesPage() {
                           type="button"
                           onClick={submitImport}
                           disabled={pending.missing.length > 0 || !pending.name.trim()}
-                          className="h-7 text-[11px] bg-zinc-900 text-white hover:bg-zinc-850 dark:bg-white dark:text-zinc-900"
+                          className="h-7 text-[11px] bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-900"
                         >
                           Confirm & Add List
                         </Button>
@@ -506,19 +532,19 @@ export default function LeadsBatchesPage() {
                           "flex flex-col justify-between rounded-lg border p-4 transition-all bg-white dark:bg-zinc-950",
                           isViewing
                             ? "border-zinc-900 ring-1 ring-zinc-900 dark:border-zinc-100 dark:ring-zinc-100"
-                            : "border-zinc-200 hover:border-zinc-350 dark:border-zinc-800 dark:hover:border-zinc-700"
+                            : "border-zinc-200 hover:border-zinc-300 dark:border-zinc-800 dark:hover:border-zinc-700"
                         )}
                       >
                         <div>
                           <div className="flex items-start justify-between gap-2">
-                            <span className="font-semibold text-sm text-zinc-900 dark:text-zinc-150 truncate block">
+                            <span className="font-semibold text-sm text-zinc-900 dark:text-zinc-100 truncate block">
                               {b.name}
                             </span>
-                            <span className="bg-zinc-100 dark:bg-zinc-850 px-2 py-0.5 rounded text-[10px] font-mono text-zinc-650 shrink-0">
+                            <span className="bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded text-[10px] font-mono text-zinc-700 dark:text-zinc-200 shrink-0">
                               {b.leadCount.toLocaleString()} leads
                             </span>
                           </div>
-                          <span className="text-[10px] text-zinc-400 dark:text-zinc-500 font-mono block truncate mt-1">
+                          <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-mono block truncate mt-1">
                             File: {b.fileName}
                           </span>
                           <span className="text-[10px] text-zinc-500 font-mono block mt-1">
@@ -530,7 +556,7 @@ export default function LeadsBatchesPage() {
                           <button
                             type="button"
                             onClick={() => handleViewLeads(b)}
-                            className="text-xs font-semibold text-zinc-900 dark:text-zinc-150 hover:underline"
+                            className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 hover:underline"
                           >
                             {isViewing ? "Inspecting" : "View Leads"}
                           </button>
@@ -565,17 +591,17 @@ export default function LeadsBatchesPage() {
               >
                 <div className="flex items-start justify-between border-b border-zinc-100 dark:border-zinc-800 pb-3 mb-4 gap-2">
                   <div className="min-w-0">
-                    <span className="text-xs text-zinc-450 font-bold uppercase tracking-wider block">
+                    <span className="text-xs text-zinc-500 dark:text-zinc-400 font-bold uppercase tracking-wider block">
                       List Inspector
                     </span>
-                    <h3 className="font-bold text-sm text-zinc-900 dark:text-zinc-150 truncate block mt-0.5">
+                    <h3 className="font-bold text-sm text-zinc-900 dark:text-zinc-100 truncate block mt-0.5">
                       {viewingBatch.name}
                     </h3>
                   </div>
                   <button
                     type="button"
                     onClick={() => setViewingBatch(null)}
-                    className="text-zinc-450 hover:text-zinc-700 font-bold text-sm"
+                    className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 font-bold text-sm"
                   >
                     Close
                   </button>
@@ -605,13 +631,13 @@ export default function LeadsBatchesPage() {
                         className="group border border-zinc-100 dark:border-zinc-900 p-2.5 rounded-md hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors flex justify-between items-center"
                       >
                         <div className="min-w-0">
-                          <span className="font-semibold text-xs text-zinc-900 dark:text-zinc-150 block">
+                          <span className="font-semibold text-xs text-zinc-900 dark:text-zinc-100 block">
                             {l.firstName} {l.lastName}
                           </span>
                           <span className="text-[10px] text-zinc-500 font-mono block">
                             {l.phone} · {l.state || "US"}
                           </span>
-                          <span className="text-[10px] text-zinc-450 truncate block">
+                          <span className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate block">
                             {l.email}
                           </span>
                         </div>

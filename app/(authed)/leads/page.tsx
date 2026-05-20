@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useToast } from "@/components/toast-provider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { broadcastLeadsHubUpdate, useLeadsHubSync } from "@/lib/leads-hub-sync";
 import { cn } from "@/lib/utils";
 import {
   parseSheet,
@@ -77,6 +78,10 @@ export default function LeadsHubPage() {
   useEffect(() => {
     loadData();
   }, []);
+
+  useLeadsHubSync(() => {
+    void loadData();
+  });
 
   // File Upload Handlers
   async function handleFile(file: File) {
@@ -211,6 +216,7 @@ export default function LeadsHubPage() {
       setPending(null);
       if (fileRef.current) fileRef.current.value = "";
       await loadData();
+      broadcastLeadsHubUpdate();
     } catch (err) {
       setParseError((err as Error).message);
     } finally {
@@ -246,6 +252,7 @@ export default function LeadsHubPage() {
           if (restoreRes.ok) {
             toast.show(`Restored ${lead.firstName} ${lead.lastName}`);
             await loadData();
+            broadcastLeadsHubUpdate();
           }
         },
       });
@@ -273,6 +280,7 @@ export default function LeadsHubPage() {
       toast.show(`Removed ${toDelete.length} leads`);
       setSelected(new Set());
       await loadData();
+      broadcastLeadsHubUpdate();
     } catch (err) {
       console.error(err);
       toast.show("Error deleting selected leads");
@@ -675,7 +683,7 @@ export default function LeadsHubPage() {
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs border-collapse">
-                <thead className="bg-zinc-50 text-[10px] uppercase tracking-wider font-semibold text-zinc-500 border-b border-zinc-200 dark:bg-zinc-900 dark:text-zinc-400 dark:border-zinc-850">
+                <thead className="bg-zinc-50 text-[10px] uppercase tracking-wider font-semibold text-zinc-500 border-b border-zinc-200 dark:bg-zinc-900 dark:text-zinc-400 dark:border-zinc-800">
                   <tr>
                     <th className="w-8 px-3 py-3">
                       <input
@@ -725,10 +733,10 @@ export default function LeadsHubPage() {
                           <td className="px-4 py-2.5 font-medium text-zinc-900 dark:text-zinc-100">
                             {l.firstName} {l.lastName}
                           </td>
-                          <td className="px-4 py-2.5 font-mono text-zinc-650 dark:text-zinc-300">
+                          <td className="px-4 py-2.5 font-mono text-zinc-700 dark:text-zinc-300">
                             {l.phone}
                           </td>
-                          <td className="px-4 py-2.5 font-mono text-zinc-650 dark:text-zinc-300">
+                          <td className="px-4 py-2.5 font-mono text-zinc-700 dark:text-zinc-300">
                             {l.email}
                           </td>
                           <td className="px-4 py-2.5 text-zinc-700 dark:text-zinc-300 truncate max-w-[150px]">
@@ -793,7 +801,7 @@ function SortHeader({
         onClick={() => onClick(sKey)}
         className={cn(
           "inline-flex items-center gap-1 group hover:text-zinc-900 dark:hover:text-zinc-200 transition-colors uppercase text-[10px]",
-          isAct ? "text-zinc-900 dark:text-zinc-150 font-bold" : "text-zinc-500"
+          isAct ? "text-zinc-900 dark:text-zinc-100 font-bold" : "text-zinc-500 dark:text-zinc-400"
         )}
       >
         {label}
