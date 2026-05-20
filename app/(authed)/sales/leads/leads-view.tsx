@@ -39,6 +39,7 @@ export function SalesLeadsView({ isAdmin: _isAdmin }: SalesLeadsViewProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const optimisticStatusByIdRef = useRef<Record<string, UserBatchStatus>>({});
+  const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     try {
@@ -108,15 +109,15 @@ export function SalesLeadsView({ isAdmin: _isAdmin }: SalesLeadsViewProps) {
     setBatches(previous);
   }
 
-  function onDownload(b: BatchRow) {
-    optimisticStatusByIdRef.current[b.id] = {
-      ...b.status,
-      downloaded_at: b.status?.downloaded_at ?? Date.now(),
+  async function markAsDownloaded(id: string) {
+    // Update optimistic state
+    optimisticStatusByIdRef.current[id] = {
+      ...optimisticStatusByIdRef.current[id],
+      downloaded_at: Date.now(),
     };
-    // Optimistically move the batch into Downloaded immediately for this user.
     setBatches((prev) =>
       prev.map((x) =>
-        x.id === b.id
+        x.id === id
           ? {
               ...x,
               status: {
@@ -127,6 +128,37 @@ export function SalesLeadsView({ isAdmin: _isAdmin }: SalesLeadsViewProps) {
           : x,
       ),
     );
+
+    // Persist to server
+    setDownloadingIds((prev) => new Set([...prev, id]));
+    try {
+      const r = await fetch(`/api/sales/batches/${encodeURIComponent(id)}/complete`, {
+        method: "POST",
+        credentials: "same-origin",
+      });
+      if (!r.ok) {
+        // Revert if failed
+        setBatches((prev) =>
+          prev.map((x) =>
+            x.id === id
+              ? {
+                  ...x,
+                  status: {
+                    ...x.status,
+                    downloaded_at: undefined,
+                  },
+                }
+              : x,
+          ),
+        );
+      }
+    } finally {
+      setDownloadingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
   }
 
   const counts: Record<Filter, number> = {
@@ -251,6 +283,7 @@ export function SalesLeadsView({ isAdmin: _isAdmin }: SalesLeadsViewProps) {
                   {group.items.map((b) => {
                     const s = uiStatus(b);
                     const dt = new Date(b.created_at).toISOString().slice(0, 10);
+                    const isDownloading = downloadingIds.has(b.id);
                     return (
                       <motion.div
                         key={b.id}
@@ -287,14 +320,13 @@ export function SalesLeadsView({ isAdmin: _isAdmin }: SalesLeadsViewProps) {
                         </div>
                         <StatusPill s={s} />
                         <div className="flex items-center gap-2">
-                          <a
-                            href={`/api/sales/batches/${encodeURIComponent(b.id)}/csv`}
-                            onClick={() => onDownload(b)}
-                            className="inline-flex h-8 items-center rounded-md bg-zinc-900 px-3 text-xs font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-                            download
+                          <button
+                            onClick={() => void markAsDownloaded(b.id)}
+                            disabled={isDownloading}
+                            className="inline-flex h-8 items-center rounded-md bg-zinc-900 px-3 text-xs font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
                           >
-                            Download CSV
-                          </a>
+                            {isDownloading ? "Downloading…" : "Download CSV"}
+                          </button>
                           {s === "downloaded" && (
                             <button
                               type="button"
