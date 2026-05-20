@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { AnimatePresence, motion } from "motion/react";
 
 type UserBatchStatus = { downloaded_at?: number; completed_at?: number };
 type BatchRow = {
@@ -245,56 +246,70 @@ export function SalesLeadsView({ isAdmin: _isAdmin }: SalesLeadsViewProps) {
                   {collapsedFolders[group.folder || "unsorted"] ? "Show" : "Hide"}
                 </span>
               </button>
-              {!collapsedFolders[group.folder || "unsorted"] &&
-                group.items.map((b) => {
-                const s = uiStatus(b);
-                const dt = new Date(b.created_at).toISOString().slice(0, 10);
-                return (
-                  <div
-                    key={b.id}
-                    className={`grid grid-cols-1 items-center gap-3 rounded-lg border p-4 sm:grid-cols-[1.4fr_auto_auto_auto] ${
-                      s === "downloaded"
-                        ? "border-emerald-300 bg-emerald-50/60 dark:border-emerald-800 dark:bg-emerald-950/20"
-                        : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
-                    }`}
-                  >
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                        {b.name}
-                      </div>
-                      <div className="mt-0.5 font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
-                        added {dt}
-                        {b.status?.downloaded_at
-                          ? ` · downloaded ${new Date(b.status.downloaded_at).toISOString().slice(0, 10)}`
-                          : ""}
-                      </div>
-                    </div>
-                    <div className="font-mono text-xs text-zinc-500 dark:text-zinc-400">
-                      {b.lead_count} leads
-                    </div>
-                    <StatusPill s={s} />
-                    <div className="flex items-center gap-2">
-                      <a
-                        href={`/api/sales/batches/${encodeURIComponent(b.id)}/csv`}
-                        onClick={() => onDownload(b)}
-                        className="inline-flex h-8 items-center rounded-md bg-zinc-900 px-3 text-xs font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-                        download
+              {!collapsedFolders[group.folder || "unsorted"] && (
+                <AnimatePresence initial={false} mode="popLayout">
+                  {group.items.map((b) => {
+                    const s = uiStatus(b);
+                    const dt = new Date(b.created_at).toISOString().slice(0, 10);
+                    return (
+                      <motion.div
+                        key={b.id}
+                        layout
+                        initial={{ opacity: 0, y: 14, scale: 0.98 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{
+                          opacity: 0,
+                          x: filter === "downloaded" ? -28 : 28,
+                          y: -8,
+                          scale: 0.98,
+                          transition: { duration: 0.2, ease: "easeInOut" },
+                        }}
+                        transition={{ duration: 0.22, ease: "easeOut" }}
+                        className={`grid grid-cols-1 items-center gap-3 rounded-lg border p-4 sm:grid-cols-[1.4fr_auto_auto_auto] ${
+                          s === "downloaded"
+                            ? "border-emerald-300 bg-emerald-50/60 dark:border-emerald-800 dark:bg-emerald-950/20"
+                            : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
+                        }`}
                       >
-                        Download CSV
-                      </a>
-                      {s === "downloaded" && (
-                        <button
-                          type="button"
-                          onClick={() => void moveToNew(b.id)}
-                          className="h-8 rounded-md border border-zinc-300 px-3 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
-                        >
-                          Move to New
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                            {b.name}
+                          </div>
+                          <div className="mt-0.5 font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
+                            added {dt}
+                            {b.status?.downloaded_at
+                              ? ` · downloaded ${new Date(b.status.downloaded_at).toISOString().slice(0, 10)}`
+                              : ""}
+                          </div>
+                        </div>
+                        <div className="font-mono text-xs text-zinc-500 dark:text-zinc-400">
+                          {b.lead_count} leads
+                        </div>
+                        <StatusPill s={s} />
+                        <div className="flex items-center gap-2">
+                          <a
+                            href={`/api/sales/batches/${encodeURIComponent(b.id)}/csv`}
+                            onClick={() => onDownload(b)}
+                            className="inline-flex h-8 items-center rounded-md bg-zinc-900 px-3 text-xs font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+                            download
+                          >
+                            Download CSV
+                          </a>
+                          {s === "downloaded" && (
+                            <button
+                              type="button"
+                              onClick={() => void moveToNew(b.id)}
+                              className="h-8 rounded-md border border-zinc-300 px-3 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+                            >
+                              Move to New
+                            </button>
+                          )}
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+                </AnimatePresence>
+              )}
             </section>
           ))}
         </div>
