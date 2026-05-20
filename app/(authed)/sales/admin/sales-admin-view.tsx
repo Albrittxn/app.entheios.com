@@ -127,6 +127,31 @@ export function SalesAdminView() {
     [availableHubBatches, selectedHubIds],
   );
 
+  const availableHubFolders = useMemo(() => {
+    const grouped = new Map<string, LeadsHubBatch[]>();
+    for (const batch of availableHubBatches) {
+      const folderName = batch.folder?.trim() || "";
+      if (!folderName) continue;
+      const current = grouped.get(folderName) ?? [];
+      current.push(batch);
+      grouped.set(folderName, current);
+    }
+
+    return [...grouped.entries()]
+      .map(([folderName, items]) => ({
+        folderName,
+        items: items.sort((a, b) =>
+          a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true }),
+        ),
+      }))
+      .sort((a, b) =>
+        a.folderName.localeCompare(b.folderName, undefined, {
+          sensitivity: "base",
+          numeric: true,
+        }),
+      );
+  }, [availableHubBatches]);
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setStatus({ msg: "" });
@@ -261,6 +286,25 @@ export function SalesAdminView() {
 
   function clearHubSelection() {
     setSelectedHubIds([]);
+  }
+
+  function folderIsFullySelected(folderName: string) {
+    const folder = availableHubFolders.find((entry) => entry.folderName === folderName);
+    return Boolean(folder && folder.items.every((item) => selectedHubIds.includes(item.id)));
+  }
+
+  function toggleHubFolder(folderName: string) {
+    const folder = availableHubFolders.find((entry) => entry.folderName === folderName);
+    if (!folder) return;
+    const folderIds = folder.items.map((item) => item.id);
+    const everySelected = folderIds.every((id) => selectedHubIds.includes(id));
+
+    setSelectedHubIds((current) => {
+      if (everySelected) {
+        return current.filter((id) => !folderIds.includes(id));
+      }
+      return [...new Set([...current, ...folderIds])];
+    });
   }
 
   function toggleBatchSelection(id: string) {
@@ -418,7 +462,7 @@ export function SalesAdminView() {
             <div>
               <h2 className="text-sm font-semibold tracking-tight">Import from Leads Hub</h2>
               <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                Pick batches to mirror into Sales.
+                Pick batches or whole folders to mirror into Sales.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -441,6 +485,38 @@ export function SalesAdminView() {
             </div>
           </div>
           <form onSubmit={importFromLeadsHub} className="mt-3 space-y-3">
+          {availableHubFolders.length > 0 && (
+            <div className="space-y-2">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500 dark:text-zinc-400">
+                Import folders
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {availableHubFolders.map((folder) => {
+                  const selected = folderIsFullySelected(folder.folderName);
+                  const leadCount = folder.items.reduce((sum, item) => sum + item.leadCount, 0);
+                  return (
+                    <button
+                      key={folder.folderName}
+                      type="button"
+                      onClick={() => toggleHubFolder(folder.folderName)}
+                      className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                        selected
+                          ? "border-zinc-900 bg-zinc-50 dark:border-zinc-100 dark:bg-zinc-900/40"
+                          : "border-zinc-200 bg-white hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-zinc-700"
+                      }`}
+                    >
+                      <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                        {folder.folderName}
+                      </div>
+                      <div className="mt-0.5 font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
+                        {folder.items.length} batch{folder.items.length === 1 ? "" : "es"} · {leadCount} leads
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           {hubLoading ? (
             <div className="rounded-md border border-dashed border-zinc-300 bg-zinc-50 p-4 text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950">
               Loading Leads Hub batches...
@@ -450,7 +526,11 @@ export function SalesAdminView() {
               Everything from Leads Hub is already imported into Sales.
             </div>
           ) : (
-            <div className="grid max-h-72 gap-2 overflow-y-auto pr-1">
+            <div className="space-y-2">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500 dark:text-zinc-400">
+                Import individual batches
+              </div>
+              <div className="grid max-h-72 gap-2 overflow-y-auto pr-1">
               {availableHubBatches.map((b) => {
                 const checked = selectedHubIds.includes(b.id);
                 return (
@@ -479,6 +559,7 @@ export function SalesAdminView() {
                   </label>
                 );
               })}
+              </div>
             </div>
           )}
           <button
