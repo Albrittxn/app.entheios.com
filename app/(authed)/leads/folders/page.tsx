@@ -23,6 +23,7 @@ export default function LeadsFoldersPage() {
   const [batchDrafts, setBatchDrafts] = useState<Record<string, string>>({});
   const [busyFolders, setBusyFolders] = useState<Record<string, boolean>>({});
   const [movingBatchIds, setMovingBatchIds] = useState<Record<string, boolean>>({});
+  const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
   const [status, setStatus] = useState<string>("");
 
   async function loadBatches() {
@@ -74,6 +75,7 @@ export default function LeadsFoldersPage() {
     const map = new Map<string, LeadsHubBatch[]>();
     for (const batch of batches) {
       const key = batch.folder.trim();
+      if (!key) continue;
       const current = map.get(key) ?? [];
       current.push(batch);
       map.set(key, current);
@@ -170,6 +172,10 @@ export default function LeadsFoldersPage() {
     }
   }
 
+  function toggleFolder(folder: string) {
+    setCollapsedFolders((prev) => ({ ...prev, [folder]: !prev[folder] }));
+  }
+
   return (
     <section className="space-y-6">
       <header className="flex items-end justify-between gap-4">
@@ -187,17 +193,31 @@ export default function LeadsFoldersPage() {
         <div className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50 p-8 text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950">
           Loading folders...
         </div>
+      ) : folders.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50 p-8 text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950">
+          No folders yet. Create folders by assigning batches on the Batches tab.
+        </div>
       ) : (
         <div className="space-y-4">
           {folders.map((group) => {
             const folderKey = group.folder.trim();
             const draft = drafts[folderKey] ?? group.folder;
             const busy = !!busyFolders[folderKey];
+            const collapsed = !!collapsedFolders[folderKey];
             return (
               <div key={group.folder || "unsorted"} className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <h2 className="text-base font-semibold tracking-tight">{group.folder || "Unsorted"}</h2>
+                    <button
+                      type="button"
+                      onClick={() => toggleFolder(folderKey)}
+                      className="flex items-center gap-2 text-left"
+                    >
+                      <h2 className="text-base font-semibold tracking-tight">{group.folder}</h2>
+                      <span className="text-[10px] font-medium uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+                        {collapsed ? "Show" : "Hide"}
+                      </span>
+                    </button>
                     <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
                       {group.items.length} batches · {group.totalLeads.toLocaleString()} leads
                     </p>
@@ -214,6 +234,8 @@ export default function LeadsFoldersPage() {
                   </div>
                 </div>
 
+                {!collapsed && (
+                  <>
                 <div className="mt-4 flex flex-wrap items-center gap-2">
                   <Input
                     value={draft}
@@ -268,6 +290,8 @@ export default function LeadsFoldersPage() {
                     </div>
                   ))}
                 </div>
+                  </>
+                )}
               </div>
             );
           })}

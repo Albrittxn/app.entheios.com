@@ -713,7 +713,7 @@ export default function LeadsBatchesPage() {
                             >
                               <div className="min-w-0">
                                 <div className="flex items-center gap-2">
-                                  <span className="block truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                                  <span className="block text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                                     {b.name}
                                   </span>
                                   <span className="shrink-0 rounded bg-zinc-100 px-2 py-0.5 font-mono text-[10px] text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
@@ -731,22 +731,20 @@ export default function LeadsBatchesPage() {
                                 {b.folder || "Unsorted"}
                               </div>
                               <div className="flex items-center gap-2">
-                                <Input
-                                  type="text"
+                                <select
                                   value={folderDrafts[b.id] ?? b.folder}
                                   onChange={(e) =>
                                     setFolderDrafts((prev) => ({ ...prev, [b.id]: e.target.value }))
                                   }
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") {
-                                      e.preventDefault();
-                                      void saveBatchFolder(b);
-                                    }
-                                  }}
-                                  list="leads-hub-folder-suggestions"
-                                  placeholder="Move to folder"
-                                  className="h-8 text-[11px] bg-white dark:bg-zinc-900"
-                                />
+                                  className="h-8 min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-3 text-[11px] text-zinc-900 focus:border-zinc-900 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-zinc-100"
+                                >
+                                  <option value="">Unsorted</option>
+                                  {folderSuggestions.map((folder) => (
+                                    <option key={folder} value={folder}>
+                                      {folder}
+                                    </option>
+                                  ))}
+                                </select>
                                 <Button
                                   type="button"
                                   onClick={() => void saveBatchFolder(b)}
