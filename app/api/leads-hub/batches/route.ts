@@ -6,6 +6,7 @@ import {
   listLeadsHubBatches,
   addLeadsHubBatch,
   deleteLeadsHubBatch,
+  updateLeadsHubBatchFolder,
   randomId,
   type LeadsHubBatch,
   type LeadsHubLead,
@@ -43,11 +44,13 @@ export async function POST(req: Request) {
     name?: unknown;
     fileName?: unknown;
     uploadedAt?: unknown;
+    folder?: unknown;
     leads?: unknown;
   };
 
   const name = typeof b.name === "string" ? b.name.trim().slice(0, 120) : "";
   const fileName = typeof b.fileName === "string" ? b.fileName.trim() : "";
+  const folder = typeof b.folder === "string" ? b.folder.trim().slice(0, 120) : "";
   const rawLeads = Array.isArray(b.leads) ? b.leads : [];
 
   if (!name) return NextResponse.json({ error: "Name required" }, { status: 400 });
@@ -90,6 +93,7 @@ export async function POST(req: Request) {
     columns: ["firstName", "lastName", "email", "phone", "brokerage", "state"],
     uploadedAt,
     uploadedBy: session.email.toLowerCase(),
+    folder,
   };
 
   try {
@@ -98,6 +102,33 @@ export async function POST(req: Request) {
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to save imported leads.";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+export async function PATCH(req: Request) {
+  const session = await getSession();
+  if (!session?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  const payload = body as { id?: unknown; folder?: unknown };
+  const id = typeof payload.id === "string" ? payload.id.trim() : "";
+  const folder = typeof payload.folder === "string" ? payload.folder.trim().slice(0, 120) : "";
+  if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
+
+  try {
+    await updateLeadsHubBatchFolder(id, folder);
+    const batches = await listLeadsHubBatches();
+    const batch = batches.find((b) => b.id === id);
+    return NextResponse.json({ ok: true, batch });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to update batch folder.";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

@@ -9,6 +9,7 @@ export type LeadsHubBatch = {
   columns: string[];
   uploadedAt: string;
   uploadedBy: string;
+  folder: string;
 };
 
 export type LeadsHubLead = {
@@ -40,6 +41,19 @@ function batchPath(id: string): string {
 
 function batchMetaPath(id: string): string {
   return `leads-hub/batches/${id}/meta.json`;
+}
+
+function normalizeBatchMeta(meta: Partial<LeadsHubBatch> & { id: string }): LeadsHubBatch {
+  return {
+    id: meta.id,
+    name: meta.name ?? "",
+    fileName: meta.fileName ?? "",
+    leadCount: meta.leadCount ?? 0,
+    columns: meta.columns ?? [],
+    uploadedAt: meta.uploadedAt ?? new Date().toISOString(),
+    uploadedBy: meta.uploadedBy ?? "",
+    folder: meta.folder ?? "",
+  };
 }
 
 function blobConfigError(): Error {
@@ -91,8 +105,8 @@ export async function listLeadsHubBatches(): Promise<LeadsHubBatch[]> {
       blobs
         .filter((blob) => blob.pathname.endsWith("/meta.json"))
         .map(async (blob) => {
-          const meta = await readBlobJson<LeadsHubBatch>(blob.pathname);
-          return meta;
+          const meta = await readBlobJson<Partial<LeadsHubBatch> & { id: string }>(blob.pathname);
+          return meta ? normalizeBatchMeta(meta) : null;
         }),
     );
 
@@ -101,6 +115,23 @@ export async function listLeadsHubBatches(): Promise<LeadsHubBatch[]> {
       .sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
   }
   return (await kvGet<LeadsHubBatch[]>("leads_hub_batches_index")) ?? [];
+}
+
+export async function updateLeadsHubBatchFolder(id: string, folder: string): Promise<void> {
+  const nextFolder = folder.trim().slice(0, 120);
+  if (blobConfigured()) {
+    const meta = await readBlobJson<Partial<LeadsHubBatch> & { id: string }>(batchMetaPath(id));
+    if (!meta) throw new Error(`Leads Hub batch not found: ${id}`);
+    await writeBlobJson(batchMetaPath(id), {
+      ...normalizeBatchMeta(meta),
+      folder: nextFolder,
+    });
+    return;
+  }
+
+  const index = await listLeadsHubBatches();
+  const nextIndex = index.map((b) => (b.id === id ? { ...b, folder: nextFolder } : b));
+  await kvPut("leads_hub_batches_index", nextIndex);
 }
 
 export async function getLeadsHubBatch(id: string): Promise<LeadsHubLead[]> {
@@ -127,7 +158,7 @@ export async function addLeadsHubBatch(
   }
   await putLeadsHubBatch(meta.id, leads);
   if (blobConfigured()) {
-    await writeBlobJson(batchMetaPath(meta.id), meta);
+    await writeBlobJson(batchMetaPath(meta.id), normalizeBatchMeta(meta));
     return;
   }
   const index = await listLeadsHubBatches();
@@ -155,7 +186,10 @@ export async function deleteLeadsHubLead(batchId: string, leadId: string): Promi
   if (blobConfigured()) {
     const meta = await readBlobJson<LeadsHubBatch>(batchMetaPath(batchId));
     if (meta) {
-      await writeBlobJson(batchMetaPath(batchId), { ...meta, leadCount: nextLeads.length });
+      await writeBlobJson(batchMetaPath(batchId), {
+        ...normalizeBatchMeta(meta),
+        leadCount: nextLeads.length,
+      });
     }
     return;
   }
@@ -173,7 +207,10 @@ export async function restoreLeadsHubLead(lead: LeadsHubLead): Promise<void> {
   if (blobConfigured()) {
     const meta = await readBlobJson<LeadsHubBatch>(batchMetaPath(lead.batchId));
     if (meta) {
-      await writeBlobJson(batchMetaPath(lead.batchId), { ...meta, leadCount: leads.length });
+      await writeBlobJson(batchMetaPath(lead.batchId), {
+        ...normalizeBatchMeta(meta),
+        leadCount: leads.length,
+      });
     }
     return;
   }

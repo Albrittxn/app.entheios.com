@@ -20,6 +20,7 @@ type PendingUpload = {
   id: string;
   fileName: string;
   name: string;
+  folder: string;
   rowCount: number;
   headers: string[];
   rows: string[][];
@@ -34,9 +35,11 @@ export default function LeadsBatchesPage() {
   const [loading, setLoading] = useState(true);
 
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
+  const [uploadFolder, setUploadFolder] = useState("");
   const [parsing, setParsing] = useState(false);
   const [parseError, setParseError] = useState<string | null>(null);
   const [importingIds, setImportingIds] = useState<string[]>([]);
+  const [folderDrafts, setFolderDrafts] = useState<Record<string, string>>({});
   const [dragOver, setDragOver] = useState(false);
 
   const [viewingBatch, setViewingBatch] = useState<LeadsHubBatch | null>(null);
@@ -63,6 +66,16 @@ export default function LeadsBatchesPage() {
   useEffect(() => {
     loadBatches();
   }, []);
+
+  useEffect(() => {
+    setFolderDrafts((prev) => {
+      const next = { ...prev };
+      for (const batch of batches) {
+        if (next[batch.id] === undefined) next[batch.id] = batch.folder;
+      }
+      return next;
+    });
+  }, [batches]);
 
   useLeadsHubSync(() => {
     void loadBatches();
@@ -124,6 +137,7 @@ export default function LeadsBatchesPage() {
               name: batch.name,
               fileName: batch.fileName,
               uploadedAt: batch.uploadedAt,
+              folder: batch.folder,
               leads: batchLeadsSnap,
             }),
           });
@@ -184,17 +198,22 @@ export default function LeadsBatchesPage() {
     return file.name.replace(/\.[^/.]+$/, "");
   }
 
+  function normalizeFolderName(value: string): string {
+    return value.trim().slice(0, 120);
+  }
+
   function makeUploadId(seed: string): string {
     return `${seed}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   }
 
-  async function parseFile(file: File): Promise<PendingUpload> {
+  async function parseFile(file: File, folder: string): Promise<PendingUpload> {
     const { headers, rows, rowCount } = await parseSheet(file);
     const { map, missing } = matchColumns(headers);
     return {
       id: makeUploadId(file.name),
       fileName: file.name,
       name: defaultBatchName(file),
+      folder,
       rowCount,
       headers,
       rows,
@@ -203,7 +222,7 @@ export default function LeadsBatchesPage() {
     };
   }
 
-  async function handleFiles(files: File[]) {
+  async function handleFiles(files: File[], folder: string) {
     setParseError(null);
     if (!files.length) return;
     setParsing(true);
@@ -211,7 +230,7 @@ export default function LeadsBatchesPage() {
       const parsed = await Promise.all(
         files.map(async (file) => {
           try {
-            return { ok: true as const, value: await parseFile(file) };
+            return { ok: true as const, value: await parseFile(file, folder) };
           } catch (err) {
             return {
               ok: false as const,
@@ -235,7 +254,7 @@ export default function LeadsBatchesPage() {
     }
   }
 
-  function handlePasteText(text: string, sourceName: string) {
+  function handlePasteText(text: string, sourceName: string, folder: string) {
     setParseError(null);
     const trimmed = text.trim();
     if (!trimmed) return;
@@ -249,6 +268,7 @@ export default function LeadsBatchesPage() {
           id: makeUploadId(sourceName),
           fileName: sourceName,
           name: sourceName,
+          folder,
           rowCount,
           headers,
           rows,
@@ -265,7 +285,7 @@ export default function LeadsBatchesPage() {
 
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
-    if (files.length) void handleFiles(files);
+    if (files.length) void handleFiles(files, normalizeFolderName(uploadFolder));
     e.target.value = "";
   }
 
@@ -273,14 +293,41 @@ export default function LeadsBatchesPage() {
     e.preventDefault();
     setDragOver(false);
     const files = Array.from(e.dataTransfer.files ?? []);
-    if (files.length) void handleFiles(files);
+    if (files.length) void handleFiles(files, normalizeFolderName(uploadFolder));
   }
 
   function onPasteZone(e: React.ClipboardEvent<HTMLDivElement>) {
     const text = e.clipboardData?.getData("text/plain") ?? "";
     if (text.trim()) {
       e.preventDefault();
-      handlePasteText(text, "Clipboard Paste");
+      handlePasteText(text, "Clipboard Paste", normalizeFolderName(uploadFolder));
+    }
+  }
+
+  function onFolderChange(value: string) {
+    const nextFolder = normalizeFolderName(value);
+    setUploadFolder(nextFolder);
+    setPendingUploads((prev) => prev.map((item) => ({ ...item, folder: nextFolder })));
+  }
+
+  async function saveBatchFolder(batch: LeadsHubBatch) {
+    const folder = normalizeFolderName(folderDrafts[batch.id] ?? batch.folder);
+    try {
+      const res = await fetch("/api/leads-hub/batches", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: batch.id, folder }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || "Failed to update folder");
+      }
+      setBatches((prev) => prev.map((item) => (item.id === batch.id ? { ...item, folder } : item)));
+      setFolderDrafts((prev) => ({ ...prev, [batch.id]: folder }));
+      broadcastLeadsHubUpdate();
+      toast.show(folder ? `Moved "${batch.name}" to ${folder}` : `Moved "${batch.name}" to Unsorted`);
+    } catch (err) {
+      toast.show((err as Error).message || "Failed to update folder");
     }
   }
 
@@ -313,6 +360,7 @@ export default function LeadsBatchesPage() {
         body: JSON.stringify({
           name: item.name,
           fileName: item.fileName,
+          folder: item.folder,
           leads: leadsToImport,
         }),
       });
@@ -354,6 +402,27 @@ export default function LeadsBatchesPage() {
     );
   }, [viewingLeads, drawerSearch]);
 
+  const groupedBatches = useMemo(() => {
+    const groups = new Map<string, LeadsHubBatch[]>();
+    for (const batch of batches) {
+      const folder = batch.folder.trim() || "";
+      const next = groups.get(folder) ?? [];
+      next.push(batch);
+      groups.set(folder, next);
+    }
+    return [...groups.entries()]
+      .map(([folder, items]) => ({
+        folder,
+        items: items.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()),
+      }))
+      .sort((a, b) => {
+        if (a.folder === b.folder) return 0;
+        if (!a.folder) return -1;
+        if (!b.folder) return 1;
+        return a.folder.localeCompare(b.folder);
+      });
+  }, [batches]);
+
   function formatUploadedDate(iso: string): string {
     const d = new Date(iso);
     return d.toLocaleDateString("en-US", {
@@ -392,6 +461,22 @@ export default function LeadsBatchesPage() {
             </div>
 
             <div className="p-6">
+              <div className="mb-4">
+                <label className="mb-1 block text-[11px] font-medium text-zinc-700 dark:text-zinc-300">
+                  Add to folder
+                </label>
+                <Input
+                  type="text"
+                  value={uploadFolder}
+                  onChange={(e) => onFolderChange(e.target.value)}
+                  placeholder="Optional folder name for this upload queue"
+                  className="h-8 text-xs bg-white dark:bg-zinc-900"
+                />
+                <p className="mt-1 text-[10px] text-zinc-500 dark:text-zinc-400">
+                  Applied to every file in the current queue, so multi-file uploads land in the same folder automatically.
+                </p>
+              </div>
+
               <div
                 tabIndex={0}
                 role="button"
@@ -515,6 +600,9 @@ export default function LeadsBatchesPage() {
                             Parsed <strong>{pending.rowCount.toLocaleString()}</strong> rows from{" "}
                             <code className="rounded bg-zinc-100 px-1 py-0.5 dark:bg-zinc-800">{pending.fileName}</code>
                           </div>
+                          <div className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400">
+                            Folder: <span className="font-medium text-zinc-700 dark:text-zinc-200">{pending.folder || "Unsorted"}</span>
+                          </div>
 
                           <div className="mt-3">
                             <span className="mb-1 block text-[10px] font-semibold text-zinc-700 dark:text-zinc-300">
@@ -575,61 +663,96 @@ export default function LeadsBatchesPage() {
             ) : batches.length === 0 ? (
               <div className="py-6 text-center text-xs text-zinc-500">No uploaded batch lists yet.</div>
             ) : (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <AnimatePresence initial={false}>
-                  {batches.map((b) => {
-                    const isViewing = viewingBatch?.id === b.id;
-                    return (
-                      <motion.div
-                        key={b.id}
-                        layout
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className={cn(
-                          "flex flex-col justify-between rounded-lg border bg-white p-4 transition-all dark:bg-zinc-950",
-                          isViewing
-                            ? "border-zinc-900 ring-1 ring-zinc-900 dark:border-zinc-100 dark:ring-zinc-100"
-                            : "border-zinc-200 hover:border-zinc-300 dark:border-zinc-800 dark:hover:border-zinc-700",
-                        )}
-                      >
-                        <div>
-                          <div className="flex items-start justify-between gap-2">
-                            <span className="block truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                              {b.name}
-                            </span>
-                            <span className="shrink-0 rounded bg-zinc-100 px-2 py-0.5 font-mono text-[10px] text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
-                              {b.leadCount.toLocaleString()} leads
-                            </span>
-                          </div>
-                          <span className="mt-1 block truncate font-mono text-[10px] text-zinc-500 dark:text-zinc-400">
-                            File: {b.fileName}
-                          </span>
-                          <span className="mt-1 block font-mono text-[10px] text-zinc-500">
-                            Uploaded {formatUploadedDate(b.uploadedAt)}
-                          </span>
-                        </div>
+              <div className="space-y-6">
+                {groupedBatches.map((group) => (
+                  <div key={group.folder || "unsorted"} className="space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                        {group.folder || "Unsorted"}
+                      </h3>
+                      <span className="font-mono text-[10px] text-zinc-400">
+                        {group.items.length} {group.items.length === 1 ? "list" : "lists"}
+                      </span>
+                    </div>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <AnimatePresence initial={false}>
+                        {group.items.map((b) => {
+                          const isViewing = viewingBatch?.id === b.id;
+                          return (
+                            <motion.div
+                              key={b.id}
+                              layout
+                              initial={{ opacity: 0 }}
+                              animate={{ opacity: 1 }}
+                              exit={{ opacity: 0 }}
+                              className={cn(
+                                "flex flex-col justify-between rounded-lg border bg-white p-4 transition-all dark:bg-zinc-950",
+                                isViewing
+                                  ? "border-zinc-900 ring-1 ring-zinc-900 dark:border-zinc-100 dark:ring-zinc-100"
+                                  : "border-zinc-200 hover:border-zinc-300 dark:border-zinc-800 dark:hover:border-zinc-700",
+                              )}
+                            >
+                              <div>
+                                <div className="flex items-start justify-between gap-2">
+                                  <span className="block truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                                    {b.name}
+                                  </span>
+                                  <span className="shrink-0 rounded bg-zinc-100 px-2 py-0.5 font-mono text-[10px] text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
+                                    {b.leadCount.toLocaleString()} leads
+                                  </span>
+                                </div>
+                                <span className="mt-1 block truncate font-mono text-[10px] text-zinc-500 dark:text-zinc-400">
+                                  File: {b.fileName}
+                                </span>
+                                <span className="mt-1 block truncate font-mono text-[10px] text-zinc-500 dark:text-zinc-400">
+                                  Folder: {b.folder || "Unsorted"}
+                                </span>
+                                <div className="mt-2 flex items-center gap-2">
+                                  <Input
+                                    type="text"
+                                    value={folderDrafts[b.id] ?? b.folder}
+                                    onChange={(e) =>
+                                      setFolderDrafts((prev) => ({ ...prev, [b.id]: e.target.value }))
+                                    }
+                                    placeholder="Move to folder"
+                                    className="h-7 text-[11px] bg-white dark:bg-zinc-900"
+                                  />
+                                  <Button
+                                    type="button"
+                                    onClick={() => void saveBatchFolder(b)}
+                                    className="h-7 shrink-0 bg-zinc-900 text-[11px] text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-900"
+                                  >
+                                    Save
+                                  </Button>
+                                </div>
+                                <span className="mt-1 block font-mono text-[10px] text-zinc-500">
+                                  Uploaded {formatUploadedDate(b.uploadedAt)}
+                                </span>
+                              </div>
 
-                        <div className="mt-4 flex items-center justify-between border-t border-zinc-100 pt-3 dark:border-zinc-900">
-                          <button
-                            type="button"
-                            onClick={() => handleViewLeads(b)}
-                            className="text-xs font-semibold text-zinc-900 hover:underline dark:text-zinc-100"
-                          >
-                            {isViewing ? "Inspecting" : "View Leads"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteBatch(b)}
-                            className="text-xs font-semibold text-zinc-400 transition-colors hover:text-rose-600"
-                          >
-                            Delete List
-                          </button>
-                        </div>
-                      </motion.div>
-                    );
-                  })}
-                </AnimatePresence>
+                              <div className="mt-4 flex items-center justify-between border-t border-zinc-100 pt-3 dark:border-zinc-900">
+                                <button
+                                  type="button"
+                                  onClick={() => handleViewLeads(b)}
+                                  className="text-xs font-semibold text-zinc-900 hover:underline dark:text-zinc-100"
+                                >
+                                  {isViewing ? "Inspecting" : "View Leads"}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteBatch(b)}
+                                  className="text-xs font-semibold text-zinc-400 transition-colors hover:text-rose-600"
+                                >
+                                  Delete List
+                                </button>
+                              </div>
+                            </motion.div>
+                          );
+                        })}
+                      </AnimatePresence>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
