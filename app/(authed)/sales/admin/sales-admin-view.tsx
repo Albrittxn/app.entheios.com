@@ -25,12 +25,10 @@ type LeadsHubBatch = {
 export function SalesAdminView() {
   const [batches, setBatches] = useState<BatchMeta[]>([]);
   const [hubBatches, setHubBatches] = useState<LeadsHubBatch[]>([]);
-  const [folders, setFolders] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [hubLoading, setHubLoading] = useState(true);
   const [name, setName] = useState("");
   const [folder, setFolder] = useState("");
-  const [newFolderName, setNewFolderName] = useState("");
   const [csv, setCsv] = useState("");
   const [selectedHubIds, setSelectedHubIds] = useState<string[]>([]);
   const [selectedBatchIds, setSelectedBatchIds] = useState<string[]>([]);
@@ -38,7 +36,6 @@ export function SalesAdminView() {
   const [status, setStatus] = useState<{ msg: string; err?: boolean }>({ msg: "" });
   const [submitting, setSubmitting] = useState(false);
   const [importingHub, setImportingHub] = useState(false);
-  const [creatingFolder, setCreatingFolder] = useState(false);
   const [removingBatchIds, setRemovingBatchIds] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -83,13 +80,6 @@ export function SalesAdminView() {
     }
   }, []);
 
-  const loadFolders = useCallback(async () => {
-    const r = await fetch("/api/sales/folders", { credentials: "same-origin" });
-    if (!r.ok) return;
-    const j = (await r.json()) as { folders: string[] };
-    setFolders(j.folders ?? []);
-  }, []);
-
   useEffect(() => {
     load();
   }, [load]);
@@ -97,10 +87,6 @@ export function SalesAdminView() {
   useEffect(() => {
     loadHubBatches();
   }, [loadHubBatches]);
-
-  useEffect(() => {
-    loadFolders();
-  }, [loadFolders]);
 
   const importedHubIds = useMemo(
     () => new Set(batches.map((b) => b.source_batch_id).filter(Boolean)),
@@ -178,7 +164,7 @@ export function SalesAdminView() {
       setFolder("");
       setCsv("");
       if (fileInputRef.current) fileInputRef.current.value = "";
-      await Promise.all([load(), loadFolders()]);
+      await load();
     } catch (error) {
       setStatus({
         msg: error instanceof Error ? error.message : "Upload failed.",
@@ -238,40 +224,6 @@ export function SalesAdminView() {
 
   async function onRemove(id: string) {
     await removeBatches([id]);
-  }
-
-  async function onCreateFolder(e: React.FormEvent) {
-    e.preventDefault();
-    if (!newFolderName.trim()) {
-      setStatus({ msg: "Folder name required.", err: true });
-      return;
-    }
-
-    setCreatingFolder(true);
-    try {
-      const r = await fetch("/api/sales/folders", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ folder: newFolderName.trim() }),
-      });
-      const j = await readJsonResponse(r);
-      if (!r.ok) {
-        setStatus({ msg: String(j.error ?? "Failed to create folder."), err: true });
-        return;
-      }
-      setFolders(((j.folders as string[] | undefined) ?? []).slice());
-      setStatus({ msg: `Created folder "${newFolderName.trim()}".` });
-      setFolder(newFolderName.trim());
-      setNewFolderName("");
-    } catch (error) {
-      setStatus({
-        msg: error instanceof Error ? error.message : "Failed to create folder.",
-        err: true,
-      });
-    } finally {
-      setCreatingFolder(false);
-    }
   }
 
   function toggleHubBatch(id: string) {
@@ -384,7 +336,7 @@ export function SalesAdminView() {
       return;
     }
     setStatus({ msg: "Folder updated." });
-    await Promise.all([load(), loadFolders()]);
+    await load();
   }
 
   const sortedBatches = useMemo(
@@ -397,9 +349,10 @@ export function SalesAdminView() {
 
   const folderOptions = useMemo(() => {
     const fromBatches = batches.map((batch) => batch.folder ?? "");
-    return [...new Set([...folders, ...fromBatches].map((value) => value.trim()).filter(Boolean))]
+    const fromHubBatches = hubBatches.map((batch) => batch.folder ?? "");
+    return [...new Set([...fromBatches, ...fromHubBatches].map((value) => value.trim()).filter(Boolean))]
       .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }));
-  }, [batches, folders]);
+  }, [batches, hubBatches]);
 
   return (
     <div className="space-y-4">
@@ -414,48 +367,6 @@ export function SalesAdminView() {
           {status.msg}
         </div>
       )}
-      <section className="rounded-lg border border-zinc-200 bg-zinc-50/70 p-3 dark:border-zinc-800 dark:bg-zinc-900/30">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h2 className="text-sm font-semibold tracking-tight">Sales folders</h2>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">
-              Create folder sections first, then drop batches into them.
-            </p>
-          </div>
-          <div className="text-xs text-zinc-500 dark:text-zinc-400">
-            {folderOptions.length} folder{folderOptions.length === 1 ? "" : "s"}
-          </div>
-        </div>
-        <form onSubmit={onCreateFolder} className="mt-3 flex flex-wrap items-center gap-2">
-          <input
-            type="text"
-            value={newFolderName}
-            onChange={(e) => setNewFolderName(e.target.value)}
-            placeholder="New folder name"
-            className="h-9 min-w-[220px] flex-1 rounded-md border border-zinc-300 bg-white px-3 text-sm focus:border-zinc-900 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:focus:border-zinc-100"
-          />
-          <button
-            type="submit"
-            disabled={creatingFolder}
-            className="inline-flex h-9 items-center rounded-md bg-zinc-900 px-4 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-          >
-            {creatingFolder ? "Adding..." : "Add folder"}
-          </button>
-        </form>
-        {folderOptions.length > 0 && (
-          <div className="mt-3 flex flex-wrap gap-2">
-            {folderOptions.map((folderName) => (
-              <span
-                key={folderName}
-                className="rounded-full border border-zinc-300 bg-white px-2.5 py-1 text-xs text-zinc-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300"
-              >
-                {folderName}
-              </span>
-            ))}
-          </div>
-        )}
-      </section>
-
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
         <section className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -643,9 +554,9 @@ export function SalesAdminView() {
       <section className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h2 className="text-sm font-semibold tracking-tight">Sales batches</h2>
+            <h2 className="text-sm font-semibold tracking-tight">Available batches</h2>
             <p className="text-xs text-zinc-500 dark:text-zinc-400">
-              Move, organize, or remove batches without leaving this tab.
+              Manage which batches are available to the sales team.
             </p>
           </div>
         </div>

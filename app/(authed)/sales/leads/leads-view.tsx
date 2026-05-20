@@ -15,10 +15,10 @@ type BatchRow = {
   status?: UserBatchStatus;
 };
 
-type Filter = "all" | "undone" | "done";
+type Filter = "all" | "new" | "downloaded";
 
-function uiStatus(b: BatchRow): "undone" | "done" {
-  return b.status?.completed_at ? "done" : "undone";
+function uiStatus(b: BatchRow): "new" | "downloaded" {
+  return b.status?.downloaded_at ? "downloaded" : "new";
 }
 
 type SalesLeadsViewProps = {
@@ -30,9 +30,9 @@ type FolderGroup = {
   items: BatchRow[];
 };
 
-export function SalesLeadsView({ isAdmin }: SalesLeadsViewProps) {
+export function SalesLeadsView({ isAdmin: _isAdmin }: SalesLeadsViewProps) {
   const [batches, setBatches] = useState<BatchRow[]>([]);
-  const [filter, setFilter] = useState<Filter>("undone");
+  const [filter, setFilter] = useState<Filter>("new");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
@@ -58,20 +58,8 @@ export function SalesLeadsView({ isAdmin }: SalesLeadsViewProps) {
     load();
   }, [load]);
 
-  async function setComplete(id: string, completed: boolean) {
-    const r = await fetch(`/api/sales/batches/${encodeURIComponent(id)}/complete`, {
-      method: completed ? "POST" : "DELETE",
-      credentials: "same-origin",
-    });
-    if (!r.ok) return;
-    const j = (await r.json()) as { status: UserBatchStatus };
-    setBatches((prev) =>
-      prev.map((b) => (b.id === id ? { ...b, status: j.status } : b)),
-    );
-  }
-
   function onDownload(b: BatchRow) {
-    // Optimistically set downloaded so the row pills update without waiting
+    // Optimistically move the batch into Downloaded immediately for this user.
     setBatches((prev) =>
       prev.map((x) =>
         x.id === b.id
@@ -89,8 +77,14 @@ export function SalesLeadsView({ isAdmin }: SalesLeadsViewProps) {
 
   const counts: Record<Filter, number> = {
     all: batches.length,
-    undone: batches.filter((b) => uiStatus(b) === "undone").length,
-    done: batches.filter((b) => uiStatus(b) === "done").length,
+    new: batches.filter((b) => uiStatus(b) === "new").length,
+    downloaded: batches.filter((b) => uiStatus(b) === "downloaded").length,
+  };
+
+  const filterLabels: Record<Filter, string> = {
+    all: "All",
+    new: "New",
+    downloaded: "Downloaded",
   };
 
   const visible = useMemo(
@@ -142,7 +136,7 @@ export function SalesLeadsView({ isAdmin }: SalesLeadsViewProps) {
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        {(["undone", "done", "all"] as Filter[]).map((f) => {
+        {(["new", "downloaded", "all"] as Filter[]).map((f) => {
           const active = filter === f;
           return (
             <button
@@ -155,7 +149,7 @@ export function SalesLeadsView({ isAdmin }: SalesLeadsViewProps) {
                   : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900"
               }`}
             >
-              <span className="capitalize">{f}</span>
+              <span>{filterLabels[f]}</span>
               <span className="font-mono text-[10px] opacity-70">{counts[f]}</span>
             </button>
           );
@@ -206,7 +200,7 @@ export function SalesLeadsView({ isAdmin }: SalesLeadsViewProps) {
                   <div
                     key={b.id}
                     className={`grid grid-cols-1 items-center gap-3 rounded-lg border p-4 sm:grid-cols-[1.4fr_auto_auto_auto] ${
-                      s === "done"
+                      s === "downloaded"
                         ? "border-emerald-300 bg-emerald-50/60 dark:border-emerald-800 dark:bg-emerald-950/20"
                         : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
                     }`}
@@ -217,11 +211,9 @@ export function SalesLeadsView({ isAdmin }: SalesLeadsViewProps) {
                       </div>
                       <div className="mt-0.5 font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
                         added {dt}
-                        {b.status?.completed_at
-                          ? ` · done ${new Date(b.status.completed_at).toISOString().slice(0, 10)}`
-                          : b.status?.downloaded_at
-                            ? ` · pulled ${new Date(b.status.downloaded_at).toISOString().slice(0, 10)}`
-                            : ""}
+                        {b.status?.downloaded_at
+                          ? ` · downloaded ${new Date(b.status.downloaded_at).toISOString().slice(0, 10)}`
+                          : ""}
                       </div>
                     </div>
                     <div className="font-mono text-xs text-zinc-500 dark:text-zinc-400">
@@ -237,24 +229,6 @@ export function SalesLeadsView({ isAdmin }: SalesLeadsViewProps) {
                       >
                         Download CSV
                       </a>
-                      {isAdmin &&
-                        (s === "done" ? (
-                          <button
-                            type="button"
-                            onClick={() => setComplete(b.id, false)}
-                            className="h-8 rounded-md border border-zinc-300 px-3 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
-                          >
-                            Move to Undone
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => setComplete(b.id, true)}
-                            className="h-8 rounded-md border border-zinc-300 px-3 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
-                          >
-                            Move to Done
-                          </button>
-                        ))}
                     </div>
                   </div>
                 );
@@ -267,12 +241,12 @@ export function SalesLeadsView({ isAdmin }: SalesLeadsViewProps) {
   );
 }
 
-function StatusPill({ s }: { s: "undone" | "done" }) {
-  const labels = { undone: "Undone", done: "Done" } as const;
+function StatusPill({ s }: { s: "new" | "downloaded" }) {
+  const labels = { new: "New", downloaded: "Downloaded" } as const;
   const classes = {
-    undone:
+    new:
       "border-zinc-300 bg-zinc-50 text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400",
-    done:
+    downloaded:
       "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300",
   } as const;
   return (
