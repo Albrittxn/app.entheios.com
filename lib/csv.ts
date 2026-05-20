@@ -129,7 +129,11 @@ export const REQUIRED_COLUMNS = [
   { key: "lastName", label: "Last name", aliases: ["lastname"] },
   { key: "email", label: "Email", aliases: ["email"] },
   { key: "phone", label: "Phone", aliases: ["phone", "phonenumber", "mobile"] },
-  { key: "brokerage", label: "Brokerage", aliases: ["brokerage", "brokerageoffice", "office"] },
+  {
+    key: "brokerage",
+    label: "Brokerage",
+    aliases: ["brokerage", "brokerageoffice", "office", "company"],
+  },
   { key: "state", label: "State", aliases: ["state"] },
 ] as const;
 
