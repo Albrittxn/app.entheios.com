@@ -461,7 +461,7 @@ export default function LeadsBatchesPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Batches</h1>
           <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-            Carve and manage your agent lists. Review, upload, or remove distinct lead uploads.
+            Batches are grouped lead lists. Upload CSV/XLSX files here and place each batch into a folder section for the team.
           </p>
         </div>
         <span className="font-mono text-xs text-zinc-500 dark:text-zinc-400">
@@ -469,35 +469,30 @@ export default function LeadsBatchesPage() {
         </span>
       </header>
 
-      <div className="grid gap-8 lg:grid-cols-3">
-        <div className="space-y-8 lg:col-span-2">
-          <div className="rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-            <div className="border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-              <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                Upload new batch list
-              </h2>
-              <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-                Drop one or more CSV/XLSX files to create distinct batches. Each batch defaults to the file name.
-              </p>
-            </div>
-
-            <div className="p-6">
-              <div className="mb-4">
-                <label className="mb-1 block text-[11px] font-medium text-zinc-700 dark:text-zinc-300">
-                  Add to folder
-                </label>
+      <div className="grid gap-6 lg:grid-cols-3">
+        <div className="space-y-6 lg:col-span-2">
+          <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+            <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                  Upload batches
+                </h2>
+                <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                  CSV/XLSX only. Every file becomes its own batch.
+                </p>
+              </div>
+              <div className="min-w-[220px] flex-1 sm:max-w-xs">
                 <Input
                   type="text"
                   value={uploadFolder}
                   onChange={(e) => onFolderChange(e.target.value)}
-                  placeholder="Optional folder name for this upload queue"
+                  placeholder="Optional folder for this upload"
                   className="h-8 text-xs bg-white dark:bg-zinc-900"
                 />
-                <p className="mt-1 text-[10px] text-zinc-500 dark:text-zinc-400">
-                  Applied to every file in the current queue, so multi-file uploads land in the same folder automatically.
-                </p>
               </div>
+            </div>
 
+            <div>
               <div
                 tabIndex={0}
                 role="button"
@@ -518,7 +513,7 @@ export default function LeadsBatchesPage() {
                   }
                 }}
                 className={cn(
-                  "flex min-h-[120px] cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed px-4 py-5 text-center transition-all",
+                  "flex min-h-[104px] cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed px-4 py-4 text-center transition-all",
                   dragOver
                     ? "border-zinc-900 bg-zinc-50 dark:border-zinc-100 dark:bg-zinc-900"
                     : "border-zinc-300 bg-zinc-50/50 hover:border-zinc-400 dark:border-zinc-800 dark:bg-zinc-900/30 dark:hover:border-zinc-700",
@@ -547,6 +542,9 @@ export default function LeadsBatchesPage() {
                     </svg>
                     <div className="mt-1.5 text-xs font-semibold text-zinc-900 dark:text-zinc-100">
                       Add and verify new list files
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+                      Folders are created from batches later, not uploaded directly.
                     </div>
                   </>
                 )}
@@ -676,7 +674,7 @@ export default function LeadsBatchesPage() {
 
           <div className="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
             <h2 className="mb-4 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-              All Uploaded Batches
+              Batch Library
             </h2>
 
             {loading ? (

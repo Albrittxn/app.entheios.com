@@ -89,8 +89,8 @@ export const HUBS: Record<HubId, Hub> = {
     accentClass: "text-gold dark:text-gold-soft",
     tabs: [
       { id: "leads", href: "/leads", label: "Leads" },
-      { id: "folders", href: "/leads/folders", label: "Folders" },
       { id: "batches", href: "/leads/batches", label: "Batches" },
+      { id: "folders", href: "/leads/folders", label: "Folders" },
       { id: "admin", href: "/leads/admin", label: "Admin", adminOnly: true },
     ],
   },

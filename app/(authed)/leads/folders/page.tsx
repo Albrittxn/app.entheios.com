@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -177,12 +176,9 @@ export default function LeadsFoldersPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Folders</h1>
           <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-            Manage Leads Hub folders in one place. Rename a folder by moving all of its batches together.
+            Folders are groups of batches. Upload happens in the Leads and Batches tabs, then organize batches here.
           </p>
         </div>
-        <Link href="/leads/batches" className="text-sm font-medium text-zinc-900 underline underline-offset-4 dark:text-zinc-100">
-          Back to Batches
-        </Link>
       </header>
 
       {status && <p className="text-xs text-zinc-500 dark:text-zinc-400">{status}</p>}

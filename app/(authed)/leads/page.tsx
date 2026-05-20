@@ -411,7 +411,7 @@ export default function LeadsHubPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Leads</h1>
           <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-            Master database of uploaded real-estate agent leads. Upload a CSV or XLSX file.
+            Master database of every imported lead. Upload CSV/XLSX files here, then organize them into batches and folders downstream.
           </p>
         </div>
         <span className="font-mono text-xs text-zinc-500 dark:text-zinc-400">
@@ -419,19 +419,23 @@ export default function LeadsHubPage() {
         </span>
       </header>
 
-      <div className="space-y-8">
-        {/* Upload leads section */}
-        <div className="rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950 shadow-sm">
-          <div className="border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-            <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-              Upload leads
-            </h2>
-            <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-              Drop a CSV/XLSX sheet, click to browse, or paste clipboard rows.
-            </p>
+      <div className="space-y-6">
+        <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                Upload leads
+              </h2>
+              <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                CSV/XLSX only. Paste clipboard rows here too.
+              </p>
+            </div>
+            <div className="font-mono text-[10px] uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+              Leads only
+            </div>
           </div>
 
-          <div className="p-6">
+          <div>
             <div
               tabIndex={0}
               role="button"
@@ -452,7 +456,7 @@ export default function LeadsHubPage() {
                 }
               }}
               className={cn(
-                "flex min-h-[140px] cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed px-4 py-6 text-center transition-all",
+                "flex min-h-[104px] cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed px-4 py-4 text-center transition-all",
                 "focus:outline-none focus-visible:border-zinc-900 focus-visible:ring-2 focus-visible:ring-zinc-400/40 dark:focus-visible:border-zinc-100 dark:focus-visible:ring-zinc-500/50",
                 dragOver
                   ? "border-zinc-900 bg-zinc-50 dark:border-zinc-100 dark:bg-zinc-900"
