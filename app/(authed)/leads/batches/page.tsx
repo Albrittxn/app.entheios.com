@@ -42,6 +42,9 @@ export default function LeadsBatchesPage() {
   const [importingIds, setImportingIds] = useState<string[]>([]);
   const [folderDrafts, setFolderDrafts] = useState<Record<string, string>>({});
   const [savingFolderIds, setSavingFolderIds] = useState<string[]>([]);
+  const [selectedBatchIds, setSelectedBatchIds] = useState<string[]>([]);
+  const [bulkFolder, setBulkFolder] = useState("");
+  const [movingBulk, setMovingBulk] = useState(false);
   const [dragOver, setDragOver] = useState(false);
 
   const [viewingBatch, setViewingBatch] = useState<LeadsHubBatch | null>(null);
@@ -50,13 +53,19 @@ export default function LeadsBatchesPage() {
   const [drawerSearch, setDrawerSearch] = useState("");
 
   const fileRef = useRef<HTMLInputElement>(null);
+  const optimisticFoldersRef = useRef<Record<string, string>>({});
 
   async function loadBatches() {
     try {
       const res = await fetch("/api/leads-hub/batches", { credentials: "same-origin" });
       if (res.ok) {
         const data = (await res.json()) as { batches?: LeadsHubBatch[]; folders?: string[] };
-        setBatches(data.batches || []);
+        setBatches(
+          (data.batches || []).map((batch) => ({
+            ...batch,
+            folder: optimisticFoldersRef.current[batch.id] ?? batch.folder,
+          })),
+        );
         setFolders(data.folders || []);
       }
     } catch (err) {
@@ -78,6 +87,10 @@ export default function LeadsBatchesPage() {
       }
       return next;
     });
+  }, [batches]);
+
+  useEffect(() => {
+    setSelectedBatchIds((prev) => prev.filter((id) => batches.some((batch) => batch.id === id)));
   }, [batches]);
 
   const folderSuggestions = useMemo(
@@ -321,36 +334,94 @@ export default function LeadsBatchesPage() {
     setPendingUploads((prev) => prev.map((item) => ({ ...item, folder: nextFolder })));
   }
 
-  async function saveBatchFolder(batch: LeadsHubBatch) {
-    const folder = normalizeFolderName(folderDrafts[batch.id] ?? batch.folder);
-    if (folder === batch.folder) {
+  async function moveBatches(batchIds: string[], folder: string) {
+    const normalizedFolder = normalizeFolderName(folder);
+    const targets = batches.filter((batch) => batchIds.includes(batch.id));
+    if (!targets.length) return;
+
+    const changedTargets = targets.filter((batch) => batch.folder !== normalizedFolder);
+    if (!changedTargets.length) {
       toast.show("Folder already up to date");
       return;
     }
-    setSavingFolderIds((prev) => [...prev, batch.id]);
-    const previousFolder = batch.folder;
-    setBatches((prev) => prev.map((item) => (item.id === batch.id ? { ...item, folder } : item)));
-    setFolderDrafts((prev) => ({ ...prev, [batch.id]: folder }));
+
+    const previousFolders = Object.fromEntries(changedTargets.map((batch) => [batch.id, batch.folder]));
+    const changedIds = changedTargets.map((batch) => batch.id);
+    setSavingFolderIds((prev) => [...new Set([...prev, ...changedIds])]);
+    for (const id of changedIds) optimisticFoldersRef.current[id] = normalizedFolder;
+    setBatches((prev) =>
+      prev.map((item) =>
+        changedIds.includes(item.id) ? { ...item, folder: normalizedFolder } : item,
+      ),
+    );
+    setFolderDrafts((prev) => {
+      const next = { ...prev };
+      for (const id of changedIds) next[id] = normalizedFolder;
+      return next;
+    });
+
     try {
-      const res = await fetch("/api/leads-hub/batches", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: batch.id, folder }),
-      });
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || "Failed to update folder");
+      for (const id of changedIds) {
+        // Keep writes dependable and preserve user feedback order.
+        // eslint-disable-next-line no-await-in-loop
+        const res = await fetch("/api/leads-hub/batches", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id, folder: normalizedFolder }),
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || "Failed to update folder");
+        }
+        delete optimisticFoldersRef.current[id];
       }
       broadcastLeadsHubUpdate();
-      toast.show(folder ? `Moved "${batch.name}" to ${folder}` : `Moved "${batch.name}" to Unsorted`);
+      toast.show(
+        normalizedFolder
+          ? `Moved ${changedIds.length} batch${changedIds.length === 1 ? "" : "es"} to ${normalizedFolder}`
+          : `Moved ${changedIds.length} batch${changedIds.length === 1 ? "" : "es"} to Unsorted`,
+      );
     } catch (err) {
       setBatches((prev) =>
-        prev.map((item) => (item.id === batch.id ? { ...item, folder: previousFolder } : item)),
+        prev.map((item) =>
+          changedIds.includes(item.id)
+            ? { ...item, folder: previousFolders[item.id] ?? item.folder }
+            : item,
+        ),
       );
-      setFolderDrafts((prev) => ({ ...prev, [batch.id]: previousFolder }));
+      setFolderDrafts((prev) => {
+        const next = { ...prev };
+        for (const id of changedIds) next[id] = previousFolders[id] ?? "";
+        return next;
+      });
+      for (const id of changedIds) delete optimisticFoldersRef.current[id];
       toast.show((err as Error).message || "Failed to update folder");
     } finally {
-      setSavingFolderIds((prev) => prev.filter((id) => id !== batch.id));
+      setSavingFolderIds((prev) => prev.filter((id) => !changedIds.includes(id)));
+    }
+  }
+
+  async function saveBatchFolder(batch: LeadsHubBatch) {
+    await moveBatches([batch.id], folderDrafts[batch.id] ?? batch.folder);
+  }
+
+  function toggleBatchSelection(id: string) {
+    setSelectedBatchIds((prev) =>
+      prev.includes(id) ? prev.filter((current) => current !== id) : [...prev, id],
+    );
+  }
+
+  async function moveSelectedBatches() {
+    if (!selectedBatchIds.length) {
+      toast.show("Select one or more batches first");
+      return;
+    }
+    setMovingBulk(true);
+    try {
+      await moveBatches(selectedBatchIds, bulkFolder);
+      setSelectedBatchIds([]);
+    } finally {
+      setMovingBulk(false);
     }
   }
 
@@ -685,6 +756,40 @@ export default function LeadsBatchesPage() {
               <div className="py-6 text-center text-xs text-zinc-500">No uploaded batch lists yet.</div>
             ) : (
               <div className="space-y-5">
+                <div className="flex flex-wrap items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/40">
+                  <span className="text-xs font-medium text-zinc-600 dark:text-zinc-300">
+                    {selectedBatchIds.length} selected
+                  </span>
+                  <select
+                    value={bulkFolder}
+                    onChange={(e) => setBulkFolder(e.target.value)}
+                    className="h-8 min-w-[180px] rounded-md border border-zinc-300 bg-white px-3 text-[11px] text-zinc-900 focus:border-zinc-900 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-zinc-100"
+                  >
+                    <option value="">Move selected to Unsorted</option>
+                    {folderSuggestions.map((folder) => (
+                      <option key={folder} value={folder}>
+                        {folder}
+                      </option>
+                    ))}
+                  </select>
+                  <Button
+                    type="button"
+                    onClick={() => void moveSelectedBatches()}
+                    disabled={movingBulk || !selectedBatchIds.length}
+                    className="h-8 bg-zinc-900 text-[11px] text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-900"
+                  >
+                    {movingBulk ? "Moving…" : "Move selected"}
+                  </Button>
+                  {!!selectedBatchIds.length && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedBatchIds([])}
+                      className="text-xs font-medium text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-100"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
                 {groupedBatches.map((group) => (
                   <div key={group.folder || "unsorted"} className="space-y-3">
                     <div className="flex items-center justify-between gap-3">
@@ -707,12 +812,21 @@ export default function LeadsBatchesPage() {
                               animate={{ opacity: 1 }}
                               exit={{ opacity: 0 }}
                               className={cn(
-                                "grid gap-3 border-b bg-white px-4 py-3 transition-all md:grid-cols-[minmax(0,1.2fr)_120px_minmax(220px,320px)_auto] md:items-center dark:bg-zinc-950",
+                                "grid gap-3 border-b bg-white px-4 py-3 transition-all md:grid-cols-[auto_minmax(0,1.2fr)_120px_minmax(220px,320px)_auto] md:items-center dark:bg-zinc-950",
                                 isViewing
                                   ? "border-zinc-900 ring-1 ring-zinc-900 dark:border-zinc-100 dark:ring-zinc-100"
                                   : "border-zinc-200 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900/50",
                               )}
                             >
+                              <div className="flex items-center md:justify-center">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedBatchIds.includes(b.id)}
+                                  onChange={() => toggleBatchSelection(b.id)}
+                                  className="h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-400/40"
+                                  aria-label={`Select ${b.name}`}
+                                />
+                              </div>
                               <div className="min-w-0">
                                 <div className="flex items-center gap-2">
                                   <span className="block text-sm font-semibold text-zinc-900 dark:text-zinc-100">
