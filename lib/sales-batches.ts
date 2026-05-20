@@ -11,6 +11,7 @@ export type BatchMeta = {
   id: string;
   name: string;
   folder?: string;
+  source_batch_id?: string;
   lead_count: number;
   columns: string[];
   created_at: number;
@@ -51,6 +52,7 @@ function normalizeBatchMeta(meta: Partial<BatchMeta> & { id: string }): BatchMet
     id: meta.id,
     name: meta.name ?? "",
     folder: meta.folder ?? "",
+    source_batch_id: meta.source_batch_id ?? "",
     lead_count: meta.lead_count ?? 0,
     columns: meta.columns ?? [],
     created_at: meta.created_at ?? Date.now(),
@@ -180,6 +182,26 @@ export async function addBatches(items: Array<{ meta: BatchMeta; rows: string[][
   const idx = await listBatchIndex();
   const next = [...items.map((item) => item.meta), ...idx];
   await writeBatchIndex(next);
+}
+
+export async function updateBatchFolder(id: string, folder: string): Promise<void> {
+  const nextFolder = folder.trim().slice(0, 120);
+  if (blobConfigured()) {
+    const meta = await readBlobJson<Partial<BatchMeta> & { id: string }>(batchMetaPath(id));
+    if (!meta) throw new Error(`Sales batch not found: ${id}`);
+    await writeBlobJson(batchMetaPath(id), {
+      ...normalizeBatchMeta(meta),
+      folder: nextFolder,
+    });
+    return;
+  }
+
+  const batch = await kvGet<Batch>(`batch:${id}`);
+  if (batch) {
+    await kvPut(`batch:${id}`, { ...batch, folder: nextFolder });
+  }
+  const index = await listBatchIndex();
+  await writeBatchIndex(index.map((item) => (item.id === id ? { ...item, folder: nextFolder } : item)));
 }
 
 export async function getUserBatchStatus(

@@ -76,6 +76,7 @@ export async function POST(req: Request) {
       id: randomId(),
       name: source.name,
       ...(source.folder ? { folder: source.folder } : {}),
+      source_batch_id: source.id,
       lead_count: rows.length,
       columns: ["First Name", "Last Name", "Phone", "Email", "Brokerage", "State"],
       created_at: Date.now(),

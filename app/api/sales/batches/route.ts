@@ -13,6 +13,7 @@ import {
   listBatchIndex,
   parseCsv,
   randomId,
+  updateBatchFolder,
 } from "@/lib/sales-batches";
 
 export async function GET() {
@@ -44,6 +45,10 @@ export async function POST(req: Request) {
     typeof (b as { folder?: unknown }).folder === "string"
       ? (b as { folder: string }).folder.trim().slice(0, 120)
       : "";
+  const sourceBatchId =
+    typeof (b as { sourceBatchId?: unknown }).sourceBatchId === "string"
+      ? (b as { sourceBatchId: string }).sourceBatchId.trim()
+      : "";
   if (!name) return NextResponse.json({ error: "Name required" }, { status: 400 });
   if (!csv) return NextResponse.json({ error: "CSV required" }, { status: 400 });
   if (csv.length > 5_000_000)
@@ -61,6 +66,7 @@ export async function POST(req: Request) {
     id: randomId(),
     name,
     ...(folder ? { folder } : {}),
+    ...(sourceBatchId ? { source_batch_id: sourceBatchId } : {}),
     lead_count: rows.length,
     columns,
     created_at: Date.now(),
@@ -71,6 +77,33 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, batch: meta });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to create batch.";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+export async function PATCH(req: Request) {
+  const session = await getSession();
+  if (!session?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!isAdminEmail(session.email))
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  const payload = body as { id?: unknown; folder?: unknown };
+  const id = typeof payload.id === "string" ? payload.id.trim() : "";
+  const folder = typeof payload.folder === "string" ? payload.folder.trim().slice(0, 120) : "";
+  if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
+
+  try {
+    await updateBatchFolder(id, folder);
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to update folder.";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

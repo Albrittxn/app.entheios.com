@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 
 type UserBatchStatus = { downloaded_at?: number; completed_at?: number };
 type BatchRow = {
   id: string;
   name: string;
   folder?: string;
+  source_batch_id?: string;
   lead_count: number;
   columns: string[];
   created_at: number;
@@ -14,12 +15,10 @@ type BatchRow = {
   status?: UserBatchStatus;
 };
 
-type Filter = "all" | "pending" | "downloaded" | "complete";
+type Filter = "all" | "undone" | "done";
 
-function uiStatus(b: BatchRow): "pending" | "downloaded" | "complete" {
-  if (b.status?.completed_at) return "complete";
-  if (b.status?.downloaded_at) return "downloaded";
-  return "pending";
+function uiStatus(b: BatchRow): "undone" | "done" {
+  return b.status?.completed_at ? "done" : "undone";
 }
 
 type SalesLeadsViewProps = {
@@ -33,7 +32,9 @@ type FolderGroup = {
 
 export function SalesLeadsView({ isAdmin }: SalesLeadsViewProps) {
   const [batches, setBatches] = useState<BatchRow[]>([]);
-  const [filter, setFilter] = useState<Filter>("all");
+  const [filter, setFilter] = useState<Filter>("undone");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
+  const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -88,22 +89,47 @@ export function SalesLeadsView({ isAdmin }: SalesLeadsViewProps) {
 
   const counts: Record<Filter, number> = {
     all: batches.length,
-    pending: batches.filter((b) => uiStatus(b) === "pending").length,
-    downloaded: batches.filter((b) => uiStatus(b) === "downloaded").length,
-    complete: batches.filter((b) => uiStatus(b) === "complete").length,
+    undone: batches.filter((b) => uiStatus(b) === "undone").length,
+    done: batches.filter((b) => uiStatus(b) === "done").length,
   };
 
-  const visible = batches.filter((b) => filter === "all" || uiStatus(b) === filter);
-  const grouped = visible.reduce<FolderGroup[]>((acc, batch) => {
-    const folder = batch.folder?.trim() || "";
-    const current = acc[acc.length - 1];
-    if (current && current.folder === folder) {
-      current.items.push(batch);
-      return acc;
+  const visible = useMemo(
+    () => batches.filter((b) => filter === "all" || uiStatus(b) === filter),
+    [batches, filter],
+  );
+
+  const grouped = useMemo(() => {
+    const map = new Map<string, BatchRow[]>();
+    for (const batch of visible) {
+      const folder = batch.folder?.trim() || "";
+      const current = map.get(folder) ?? [];
+      current.push(batch);
+      map.set(folder, current);
     }
-    acc.push({ folder, items: [batch] });
-    return acc;
-  }, []);
+
+    return [...map.entries()]
+      .sort(([a], [b]) => {
+        if (!a && !b) return 0;
+        if (!a) return -1;
+        if (!b) return 1;
+        return a.localeCompare(b, undefined, { sensitivity: "base", numeric: true });
+      })
+      .map(([folder, items]) => ({
+        folder,
+        items: [...items].sort((a, b) => {
+          const comparison = a.name.localeCompare(b.name, undefined, {
+            sensitivity: "base",
+            numeric: true,
+          });
+          return sortOrder === "asc" ? comparison : -comparison;
+        }),
+      }));
+  }, [visible, sortOrder]);
+
+  function toggleFolder(folder: string) {
+    const key = folder || "unsorted";
+    setCollapsedFolders((current) => ({ ...current, [key]: !current[key] }));
+  }
 
   if (error) {
     return (
@@ -115,8 +141,8 @@ export function SalesLeadsView({ isAdmin }: SalesLeadsViewProps) {
 
   return (
     <div>
-      <div className="mb-4 flex flex-wrap gap-2">
-        {(["all", "pending", "downloaded", "complete"] as Filter[]).map((f) => {
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        {(["undone", "done", "all"] as Filter[]).map((f) => {
           const active = filter === f;
           return (
             <button
@@ -134,6 +160,13 @@ export function SalesLeadsView({ isAdmin }: SalesLeadsViewProps) {
             </button>
           );
         })}
+        <button
+          type="button"
+          onClick={() => setSortOrder((current) => (current === "asc" ? "desc" : "asc"))}
+          className="inline-flex items-center rounded-full border border-zinc-300 bg-white px-3 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900"
+        >
+          Title {sortOrder === "asc" ? "A-Z" : "Z-A"}
+        </button>
       </div>
 
       {loading ? (
@@ -148,7 +181,11 @@ export function SalesLeadsView({ isAdmin }: SalesLeadsViewProps) {
         <div className="space-y-6">
           {grouped.map((group) => (
             <section key={group.folder || "unsorted"} className="space-y-2">
-              <div className="flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => toggleFolder(group.folder)}
+                className="flex w-full items-center justify-between gap-3 rounded-md px-1 py-1 text-left"
+              >
                 <div>
                   <h2 className="text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
                     {group.folder || "Unsorted"}
@@ -157,15 +194,19 @@ export function SalesLeadsView({ isAdmin }: SalesLeadsViewProps) {
                     {group.items.length} {group.items.length === 1 ? "batch" : "batches"}
                   </p>
                 </div>
-              </div>
-              {group.items.map((b) => {
+                <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                  {collapsedFolders[group.folder || "unsorted"] ? "Show" : "Hide"}
+                </span>
+              </button>
+              {!collapsedFolders[group.folder || "unsorted"] &&
+                group.items.map((b) => {
                 const s = uiStatus(b);
                 const dt = new Date(b.created_at).toISOString().slice(0, 10);
                 return (
                   <div
                     key={b.id}
                     className={`grid grid-cols-1 items-center gap-3 rounded-lg border p-4 sm:grid-cols-[1.4fr_auto_auto_auto] ${
-                      s === "complete"
+                      s === "done"
                         ? "border-emerald-300 bg-emerald-50/60 dark:border-emerald-800 dark:bg-emerald-950/20"
                         : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
                     }`}
@@ -197,13 +238,13 @@ export function SalesLeadsView({ isAdmin }: SalesLeadsViewProps) {
                         Download CSV
                       </a>
                       {isAdmin &&
-                        (s === "complete" ? (
+                        (s === "done" ? (
                           <button
                             type="button"
                             onClick={() => setComplete(b.id, false)}
                             className="h-8 rounded-md border border-zinc-300 px-3 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
                           >
-                            Reopen
+                            Move to Undone
                           </button>
                         ) : (
                           <button
@@ -211,7 +252,7 @@ export function SalesLeadsView({ isAdmin }: SalesLeadsViewProps) {
                             onClick={() => setComplete(b.id, true)}
                             className="h-8 rounded-md border border-zinc-300 px-3 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
                           >
-                            Mark complete
+                            Move to Done
                           </button>
                         ))}
                     </div>
@@ -226,14 +267,12 @@ export function SalesLeadsView({ isAdmin }: SalesLeadsViewProps) {
   );
 }
 
-function StatusPill({ s }: { s: "pending" | "downloaded" | "complete" }) {
-  const labels = { pending: "Pending", downloaded: "Downloaded", complete: "Complete" } as const;
+function StatusPill({ s }: { s: "undone" | "done" }) {
+  const labels = { undone: "Undone", done: "Done" } as const;
   const classes = {
-    pending:
+    undone:
       "border-zinc-300 bg-zinc-50 text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400",
-    downloaded:
-      "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300",
-    complete:
+    done:
       "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300",
   } as const;
   return (

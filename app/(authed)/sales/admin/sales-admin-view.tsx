@@ -6,6 +6,7 @@ type BatchMeta = {
   id: string;
   name: string;
   folder?: string;
+  source_batch_id?: string;
   lead_count: number;
   columns: string[];
   created_at: number;
@@ -30,6 +31,7 @@ export function SalesAdminView() {
   const [folder, setFolder] = useState("");
   const [csv, setCsv] = useState("");
   const [selectedHubIds, setSelectedHubIds] = useState<string[]>([]);
+  const [folderDrafts, setFolderDrafts] = useState<Record<string, string>>({});
   const [status, setStatus] = useState<{ msg: string; err?: boolean }>({ msg: "" });
   const [submitting, setSubmitting] = useState(false);
   const [importingHub, setImportingHub] = useState(false);
@@ -50,6 +52,13 @@ export function SalesAdminView() {
     if (!r.ok) return;
     const j = (await r.json()) as { batches: BatchMeta[] };
     setBatches(j.batches);
+    setFolderDrafts((current) => {
+      const next = { ...current };
+      for (const batch of j.batches) {
+        if (next[batch.id] === undefined) next[batch.id] = batch.folder ?? "";
+      }
+      return next;
+    });
     setLoading(false);
   }, []);
 
@@ -74,9 +83,29 @@ export function SalesAdminView() {
     loadHubBatches();
   }, [loadHubBatches]);
 
+  const importedHubIds = useMemo(
+    () => new Set(batches.map((b) => b.source_batch_id).filter(Boolean)),
+    [batches],
+  );
+
+  const importedNames = useMemo(
+    () => new Set(batches.map((b) => b.name.trim().toLowerCase()).filter(Boolean)),
+    [batches],
+  );
+
+  const availableHubBatches = useMemo(
+    () =>
+      hubBatches.filter(
+        (batch) =>
+          !importedHubIds.has(batch.id) &&
+          !importedNames.has(batch.name.trim().toLowerCase()),
+      ),
+    [hubBatches, importedHubIds, importedNames],
+  );
+
   const selectedHubBatches = useMemo(
-    () => hubBatches.filter((b) => selectedHubIds.includes(b.id)),
-    [hubBatches, selectedHubIds],
+    () => availableHubBatches.filter((b) => selectedHubIds.includes(b.id)),
+    [availableHubBatches, selectedHubIds],
   );
 
   async function onSubmit(e: React.FormEvent) {
@@ -141,7 +170,7 @@ export function SalesAdminView() {
         msg: `Imported ${imported} batch${imported === 1 ? "" : "es"} from Leads Hub.`,
       });
       setSelectedHubIds([]);
-      await load();
+      await Promise.all([load(), loadHubBatches()]);
     } catch (error) {
       setStatus({
         msg: error instanceof Error ? error.message : "Import failed.",
@@ -186,12 +215,37 @@ export function SalesAdminView() {
   }
 
   function selectAllHubBatches() {
-    setSelectedHubIds(hubBatches.map((b) => b.id));
+    setSelectedHubIds(availableHubBatches.map((b) => b.id));
   }
 
   function clearHubSelection() {
     setSelectedHubIds([]);
   }
+
+  async function saveFolder(id: string) {
+    const folderValue = (folderDrafts[id] ?? "").trim();
+    const r = await fetch("/api/sales/batches", {
+      method: "PATCH",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id, folder: folderValue }),
+    });
+    const j = await readJsonResponse(r);
+    if (!r.ok) {
+      setStatus({ msg: String(j.error ?? "Failed to update folder."), err: true });
+      return;
+    }
+    setStatus({ msg: "Folder updated." });
+    await load();
+  }
+
+  const sortedBatches = useMemo(
+    () =>
+      [...batches].sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true }),
+      ),
+    [batches],
+  );
 
   return (
     <div className="space-y-8">
@@ -215,7 +269,7 @@ export function SalesAdminView() {
           <button
             type="button"
             onClick={selectAllHubBatches}
-            disabled={hubLoading || !hubBatches.length}
+            disabled={hubLoading || !availableHubBatches.length}
             className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
           >
             Select all
@@ -234,13 +288,13 @@ export function SalesAdminView() {
             <div className="rounded-md border border-dashed border-zinc-300 bg-zinc-50 p-4 text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950">
               Loading Leads Hub batches...
             </div>
-          ) : hubBatches.length === 0 ? (
+          ) : availableHubBatches.length === 0 ? (
             <div className="rounded-md border border-dashed border-zinc-300 bg-zinc-50 p-4 text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950">
-              No Leads Hub batches yet.
+              Everything from Leads Hub is already imported into Sales.
             </div>
           ) : (
             <div className="grid gap-2">
-              {hubBatches.map((b) => {
+              {availableHubBatches.map((b) => {
                 const checked = selectedHubIds.includes(b.id);
                 return (
                   <label
@@ -350,10 +404,10 @@ export function SalesAdminView() {
           <p className="mt-2 text-sm text-zinc-500">No batches uploaded yet.</p>
         ) : (
           <div className="mt-3 space-y-2">
-            {batches.map((b) => (
+            {sortedBatches.map((b) => (
               <div
                 key={b.id}
-                className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950"
+                className="grid gap-3 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950 md:grid-cols-[minmax(0,1fr)_260px_auto]"
               >
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
@@ -362,6 +416,24 @@ export function SalesAdminView() {
                   <div className="mt-0.5 truncate font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
                     {b.folder || "Unsorted"} · {b.lead_count} leads · {new Date(b.created_at).toISOString().slice(0, 10)} · cols: {b.columns.join(", ")}
                   </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={folderDrafts[b.id] ?? b.folder ?? ""}
+                    onChange={(e) =>
+                      setFolderDrafts((current) => ({ ...current, [b.id]: e.target.value }))
+                    }
+                    placeholder="User folder section"
+                    className="h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm focus:border-zinc-900 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:focus:border-zinc-100"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void saveFolder(b.id)}
+                    className="h-9 rounded-md border border-zinc-300 px-3 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+                  >
+                    Move
+                  </button>
                 </div>
                 <button
                   type="button"
