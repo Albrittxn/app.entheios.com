@@ -153,6 +153,8 @@ export function SalesLeadsView({
 
       const link = document.createElement("a");
       link.href = downloadUrl;
+      link.download = `${(batch?.name ?? "batch").replace(/[^a-z0-9._-]+/gi, "_")}.csv`;
+      link.style.display = "none";
       document.body.appendChild(link);
       link.click();
       link.remove();
