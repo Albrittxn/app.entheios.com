@@ -21,10 +21,10 @@ const TODAY_LABEL = TODAY.toLocaleDateString("en-US", {
 // with what closers are already told they'll be paid.
 const PAYOUT_TERMS: { label: string; value: string }[] = [
   { label: "Role", value: "Independent Contractor — Closer" },
-  { label: "Setup commission", value: "10% of the setup fee per closed deal, subject to increase over time" },
+  { label: "Setup commission", value: "10% of the setup fee per closed deal, increasing to 15% for any closer maintaining above a 25% close rate" },
   { label: "Recurring commission", value: "TBD — locked in once retainer structure is finalized" },
-  { label: "Payout method", value: "Zelle or bank transfer" },
-  { label: "Payout timing", value: "Within 2–3 business days of close" },
+  { label: "Payout method", value: "Withdrawal link sent by email and text to transfer commission to your bank account" },
+  { label: "Payout timing", value: "Two days after close" },
   { label: "Term", value: "Month-to-month, terminable by either party with 14 days' notice" },
 ];
 
@@ -32,7 +32,7 @@ const CONTRACT_BODY = `This Independent Contractor Payout Agreement ("Agreement"
 
 1. ENGAGEMENT. Company engages Contractor as an independent contractor to conduct discovery calls and close prospects routed through Company's lead pipeline. Contractor is not an employee, partner, agent, or joint venturer of Company and is solely responsible for all applicable taxes, insurance, and withholdings on amounts paid hereunder.
 
-2. PAYOUT TERMS. Compensation is as specified in the "Payout Terms" section above. Setup commission accrues at the time payment from the prospect clears and is paid within 2–3 business days via Zelle or bank transfer. Refunds, chargebacks, or non-collected revenue reverse the corresponding commission.
+2. PAYOUT TERMS. Compensation is as specified in the "Payout Terms" section above. Setup commission accrues at the time payment from the prospect clears. Closers earn 10% of the setup fee per closed deal, increasing to 15% for any closer maintaining above a 25% close rate. Two days after the close, Company sends the closer an email and text containing a withdrawal link so the closer can transfer the earned commission to their bank account. Refunds, chargebacks, or non-collected revenue reverse the corresponding commission.
 
 3. EXPENSES. Contractor is responsible for their own expenses unless pre-approved in writing by Company.
 

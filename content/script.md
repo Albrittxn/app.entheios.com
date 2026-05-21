@@ -152,7 +152,7 @@ First to speak loses.
 
 **Logging:** within 30 minutes, update the call row in the **Calls** tab (`Status`, `Objections` if any, `Notes`).
 
-**Payout:** 10% setup commission, paid via Zelle or bank transfer within 2–3 business days of close.
+**Payout:** 10% setup commission, increasing to 15% once you are closing above a 25% close rate. Two days after the close, you get an email and text with a withdrawal link to move your commission to your bank account.
 - Growth: $350
 - Scale: $750
 - Enterprise: quoted per deal
