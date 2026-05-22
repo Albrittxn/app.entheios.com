@@ -27,6 +27,10 @@ export type UserBatchStatus = {
 };
 
 type UserBatchStatusMap = Record<string, UserBatchStatus>;
+type EdgeUserBatchStatusResult = {
+  found: boolean;
+  statuses: UserBatchStatusMap;
+};
 
 function blobConfigured(): boolean {
   return Boolean(process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID);
@@ -287,11 +291,12 @@ function edgeStatusWritable(): boolean {
   );
 }
 
-async function readEdgeUserBatchStatusMap(email: string): Promise<UserBatchStatusMap | null> {
+async function readEdgeUserBatchStatusMap(email: string): Promise<EdgeUserBatchStatusResult | null> {
   if (!process.env.EDGE_CONFIG) return null;
   try {
     const raw = await edgeGet<unknown>(batchStatusStoreKey(email));
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+    if (raw == null) return { found: false, statuses: {} };
+    if (typeof raw !== "object" || Array.isArray(raw)) return { found: true, statuses: {} };
     const out: UserBatchStatusMap = {};
     for (const [batchId, value] of Object.entries(raw)) {
       if (!value || typeof value !== "object" || Array.isArray(value)) continue;
@@ -308,9 +313,9 @@ async function readEdgeUserBatchStatusMap(email: string): Promise<UserBatchStatu
         ...(completed_at ? { completed_at } : {}),
       };
     }
-    return out;
+    return { found: true, statuses: out };
   } catch {
-    return {};
+    return { found: false, statuses: {} };
   }
 }
 
@@ -348,9 +353,9 @@ export async function getUserBatchStatus(
   batchId: string,
 ): Promise<UserBatchStatus> {
   const normalizedEmail = normalizeStatusEmail(email);
-  const edgeStatuses = await readEdgeUserBatchStatusMap(normalizedEmail);
-  if (edgeStatuses && edgeStatuses[batchId]) {
-    return edgeStatuses[batchId];
+  const edgeStatusResult = await readEdgeUserBatchStatusMap(normalizedEmail);
+  if (edgeStatusResult?.found) {
+    return edgeStatusResult.statuses[batchId] ?? {};
   }
 
   if (blobConfigured()) {
@@ -358,7 +363,7 @@ export async function getUserBatchStatus(
     const current = await readBlobJson<UserBatchStatus>(currentPath);
     if (current) {
       if (edgeStatusWritable()) {
-        const next = { ...(edgeStatuses ?? {}), [batchId]: current };
+        const next = { ...(edgeStatusResult?.statuses ?? {}), [batchId]: current };
         await writeEdgeUserBatchStatusMap(normalizedEmail, next);
       }
       return current;
@@ -368,7 +373,7 @@ export async function getUserBatchStatus(
     if (legacyPath !== currentPath) {
       const legacy = (await readBlobJson<UserBatchStatus>(legacyPath)) ?? {};
       if ((legacy.downloaded_at || legacy.completed_at) && edgeStatusWritable()) {
-        const next = { ...(edgeStatuses ?? {}), [batchId]: legacy };
+        const next = { ...(edgeStatusResult?.statuses ?? {}), [batchId]: legacy };
         await writeEdgeUserBatchStatusMap(normalizedEmail, next);
       }
       return legacy;
@@ -385,7 +390,7 @@ export async function putUserBatchStatus(
 ): Promise<void> {
   const normalizedEmail = normalizeStatusEmail(email);
   if (edgeStatusWritable()) {
-    const statuses = (await readEdgeUserBatchStatusMap(normalizedEmail)) ?? {};
+    const statuses = (await readEdgeUserBatchStatusMap(normalizedEmail))?.statuses ?? {};
     const next = { ...statuses };
     if (s.downloaded_at || s.completed_at) next[batchId] = s;
     else delete next[batchId];
