@@ -61,7 +61,7 @@ function batchFoldersPath(): string {
 }
 
 function batchStatusStoreKey(email: string): string {
-  return `sales_batch_statuses:${batchStatusUserKey(email)}`;
+  return `sales_batch_statuses_${batchStatusUserKey(email)}`;
 }
 
 function blobConfigError(): Error {
