@@ -102,6 +102,7 @@ export const HUBS: Record<HubId, Hub> = {
     accentClass: "text-gold dark:text-gold-soft",
     tabs: [
       { id: "overview", href: "/investing/overview", label: "Overview" },
+      { id: "wallet", href: "/investing/wallet", label: "Wallet" },
       { id: "admin", href: "/investing/admin", label: "Admin", adminOnly: true },
     ],
   },
