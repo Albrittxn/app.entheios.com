@@ -3,6 +3,7 @@
 
 import { getEffectiveUser } from "@/lib/effective-user";
 import { getInvestmentFor } from "@/lib/investments-store";
+import { WalletActions } from "@/components/investing/wallet-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -65,6 +66,9 @@ export default async function InvestingOverview() {
             Last updated {record.updatedAt.slice(0, 10)}
           </div>
         )}
+        <div className="mt-5">
+          <WalletActions />
+        </div>
       </div>
 
       <h2 className="mt-8 text-base font-semibold tracking-tight">Projected growth</h2>
