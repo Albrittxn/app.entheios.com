@@ -35,7 +35,7 @@ export function WalletActions({ showWithdrawal = false }: WalletActionsProps) {
             Featured Offer
           </span>
           <span className="mt-1 text-sm font-semibold">
-            Add $50 and receive $2500 invested alongside you
+            Add $50 and receive $500 invested alongside you
           </span>
         </span>
         <span className="text-base font-medium text-[rgb(176,134,0)] transition group-hover:translate-x-0.5 dark:text-[rgb(229,196,98)]">
