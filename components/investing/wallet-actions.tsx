@@ -37,6 +37,9 @@ export function WalletActions({ showWithdrawal = false }: WalletActionsProps) {
           <span className="mt-1 text-sm font-semibold">
             Add $50 and receive $500 invested alongside you
           </span>
+          <span className="mt-1 text-[11px] text-zinc-600 dark:text-zinc-300">
+            Offer ends tonight, May 27
+          </span>
         </span>
         <span className="text-base font-medium text-[rgb(176,134,0)] transition group-hover:translate-x-0.5 dark:text-[rgb(229,196,98)]">
           Learn more
