@@ -2,54 +2,42 @@ import { getCompanyMetrics } from "@/lib/company-metrics";
 import { getLeadsHubAllLeads, listLeadsHubBatches } from "@/lib/leads-hub-store";
 import { DashboardCard } from "@/components/dashboard/dashboard-card";
 import { AnimatedCounter } from "@/components/dashboard/animated-counter";
-import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
 type StateMetric = {
   state: string;
   dials: number;
-  bookings: number;
   ratio: number;
 };
 
 export default async function SalesDashboard() {
   const { closing } = await getCompanyMetrics();
-  
-  // Get all leads to count downloaded leads and group by state
-  const allLeads = await getLeadsHubAllLeads();
-  const batches = await listLeadsHubBatches();
-  
-  // Count total downloaded leads
-  const totalDownloadedLeads = batches.reduce((sum, b) => sum + b.leadCount, 0);
-  
-  // Calculate dials to bookings ratio
-  const dialsToBookings = totalDownloadedLeads > 0 
-    ? (closing.booked / totalDownloadedLeads).toFixed(3)
+
+  // Load leads-hub data with graceful fallbacks — blob/KV errors must not
+  // crash the Server Component, so both calls are wrapped in try-catch.
+  const batches = await listLeadsHubBatches().catch(() => []);
+  const allLeads = await getLeadsHubAllLeads().catch(() => []);
+
+  // Total leads available across all Leads Hub batches
+  const totalLeads = batches.reduce((sum, b) => sum + b.leadCount, 0);
+
+  // Dials-to-bookings ratio
+  const dialsToBookings = totalLeads > 0
+    ? (closing.booked / totalLeads).toFixed(3)
     : "0.000";
-  
-  // Group leads by state and calculate metrics
+
+  // Group leads by state
   const stateMetrics = new Map<string, StateMetric>();
   for (const lead of allLeads) {
     const state = lead.state || "Unknown";
     if (!stateMetrics.has(state)) {
-      stateMetrics.set(state, {
-        state,
-        dials: 0,
-        bookings: 0,
-        ratio: 0,
-      });
+      stateMetrics.set(state, { state, dials: 0, ratio: 0 });
     }
-    const metric = stateMetrics.get(state)!;
-    metric.dials += 1;
+    stateMetrics.get(state)!.dials += 1;
   }
-  
-  // Add booking counts per state from closing leads
-  for (const closingLead of closing.bookingsByDay || []) {
-    // Note: closing leads include market/state, calculate from closing data
-  }
-  
-  // Sort states by dial count
+
+  // Sort states by dial count, take top 10
   const sortedStates = Array.from(stateMetrics.values())
     .sort((a, b) => b.dials - a.dials)
     .slice(0, 10);
@@ -92,19 +80,19 @@ export default async function SalesDashboard() {
             <div className="mt-2 flex items-baseline gap-1 text-xs text-zinc-600 dark:text-zinc-400">
               <span>{closing.booked} booked</span>
               <span>÷</span>
-              <span>{totalDownloadedLeads} leads</span>
+              <span>{totalLeads} leads</span>
             </div>
           </div>
         </DashboardCard>
 
-        {/* Total Downloaded Leads */}
+        {/* Total Leads */}
         <DashboardCard delay={0.16} className="h-full">
           <div className="rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-950">
             <div className="text-xs font-medium uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
-              Downloaded Leads
+              Total Leads
             </div>
             <div className="mt-3 text-4xl font-bold text-zinc-900 dark:text-zinc-100">
-              <AnimatedCounter value={totalDownloadedLeads} />
+              <AnimatedCounter value={totalLeads} />
             </div>
             <div className="mt-2 text-xs text-zinc-600 dark:text-zinc-400">
               {batches.length} batch{batches.length === 1 ? "" : "es"}

@@ -101,7 +101,11 @@ async function readBlobJson<T>(pathname: string): Promise<T | null> {
   const result = await blobGet(pathname, { access: "private" });
   if (result && result.statusCode === 200 && result.stream) {
     const text = await new Response(result.stream).text();
-    return JSON.parse(text) as T;
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      return null;
+    }
   }
 
   // Blob pathnames that already contain percent-encoded segments can fail to
@@ -114,7 +118,11 @@ async function readBlobJson<T>(pathname: string): Promise<T | null> {
       const byUrl = await blobGet(exact.url, { access: "private" });
       if (byUrl && byUrl.statusCode === 200 && byUrl.stream) {
         const text = await new Response(byUrl.stream).text();
-        return JSON.parse(text) as T;
+        try {
+          return JSON.parse(text) as T;
+        } catch {
+          return null;
+        }
       }
     }
   }

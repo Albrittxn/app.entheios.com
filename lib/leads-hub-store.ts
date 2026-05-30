@@ -70,7 +70,11 @@ async function readBlobJson<T>(pathname: string): Promise<T | null> {
   const result = await get(pathname, { access: "private" });
   if (!result || result.statusCode !== 200 || !result.stream) return null;
   const text = await new Response(result.stream).text();
-  return JSON.parse(text) as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return null;
+  }
 }
 
 async function writeBlobJson(pathname: string, value: unknown): Promise<void> {
